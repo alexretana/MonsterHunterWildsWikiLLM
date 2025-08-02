@@ -1,0 +1,43 @@
+# byte-compiled / cache
+*/__pycache__/
+*.py[cod]
+*.so
+
+# Scrapy job directories
+wikiproject/jobs/
+wikiproject/crawls/
+
+# Logs
+wikiproject/logs/
+*.log
+
+# Scrapy HTTP cache
+wikiproject/.httpcache/
+
+# Output files
+/wikiproject/output/
+*.csv
+*.json
+*.jsonl
+*.jl
+*.xml
+
+# Environment / tools
+.venv/
+env/
+venv/
+*.egg-info/
+*.db
+
+# IDEs/editors
+.vscode/
+.idea/
+
+#OS
+.DS_Store
+Thubms.db
+
+# Open WebUI secret
+.webui_secret_key
+
+*/.ipynb_checkpoints/
