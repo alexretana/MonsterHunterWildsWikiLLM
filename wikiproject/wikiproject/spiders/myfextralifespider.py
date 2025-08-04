@@ -9,10 +9,6 @@ class MyFextralifeSpider(scrapy.Spider):
     allowed_domains = ["monsterhunterwilds.wiki.fextralife.com"]
     start_urls = ["https://monsterhunterwilds.wiki.fextralife.com/Monster+Hunter+Wilds+Wiki"]
 
-    # track scheduled unique URLs
-    scheduled_urls = set()
-    pages_crawled = 0
-    ESTIMATION_INTERVAL = 10
 
     custom_settings = {
         "JOBDIR": f'jobs/daily-fextralife-{datetime.today().strftime("%Y-%m-%d")}',
@@ -26,26 +22,6 @@ class MyFextralifeSpider(scrapy.Spider):
         "LOG_STDOUT": True,
         "LOG_ENABLED": True
     }
-
-    def run_estimation(self):
-        pages_scheduled = len(self.scheduled_urls)
-        pages_crawled = self.pages_crawled
-
-        if pages_scheduled > 0:
-            percent_complete = pages_crawled / pages_scheduled * 100
-            estimated_remaining = pages_scheduled - pages_crawled
-
-            logging.info(f"[Estimation] Scheduled unique URLs: {pages_scheduled}")
-            logging.info(f"[Estimation] Pages crawled: {pages_crawled}")
-            logging.info(f"[Estimation] Remaining: {estimated_remaining} ({percent_complete:.2f}% complete)")
-
-
-            self.crawler.stats.set_value('estimation/scheduled', pages_scheduled)
-            self.crawler.stats.set_value('estimation/crawled', pages_crawled)
-            self.crawler.stats.set_value('estimation/remaining', estimated_remaining)
-            self.crawler.stats.set_value('estimation/percent_complete', percent_complete)
-        else:
-            logging.info("[Estimate] No pages scheduled yet.")
 
     def parse_breadcrumb(self, sel):
         breadcrumb_tags = "/" + "/".join([x for x in sel.css('div.breadcrumb-wrapper a::text').getall() if x != '+'])
@@ -118,16 +94,15 @@ class MyFextralifeSpider(scrapy.Spider):
 
         return normalized_data
 
-    def make_wiki_doc(self, response):
+    def make_wiki_doc(self, response, html_node):
         title = response.url.split("/")[-1]
-        sel = response.selector
+        sel = Selector(text=html_node)
 
         breadcrumb = self.parse_breadcrumb(sel)
 
         wiki_content = self.parse_wiki_content(sel)
 
-        page_html = sel.css('html').get()
-        table_json_dump = json.dumps(self.parse_wiki_tables(page_html), indent=2)
+        table_json_dump = json.dumps(self.parse_wiki_tables(html_node), indent=2)
         
         wiki_doc = f"""
 If the user's answer is answered by information in this file, please direct them to {response.url}
@@ -148,14 +123,9 @@ Page Tables Stored as JSON (copy below)
 
 
     def parse(self, response):
-        # Restore state if first page in session
-        if self.pages_crawled == 0 and "scheduled_urls" in self.state:
-            self.scheduled_urls = set(self.state["scheduled_urls"])
-            self.pages_crawled = self.state.get("pages_crawled", 0)
+        html_node = response.css('html').get()
 
-        self.pages_crawled += 1
-
-        title, breadcrumb, wiki_doc = self.make_wiki_doc(response)
+        title, breadcrumb, wiki_doc = self.make_wiki_doc(response, html_node)
 
         doc_filename = f'./output/documents/{(breadcrumb + "-" + title).replace("/","-").strip("-")}.txt'
         with open(doc_filename, 'w', encoding='utf-8') as f:
@@ -169,25 +139,13 @@ Page Tables Stored as JSON (copy below)
             'wiki_content': wiki_doc,
             'updatedAt': datetime.utcnow().isoformat()
         }
-        # Every N pages, run estimate
-        if self.pages_crawled % self.ESTIMATION_INTERVAL == 0:
-            self.run_estimation()
 
         for href in response.css('a::attr(href)').getall():
-            if href and href.startswith('/'):
+            if href and self.allowed_domains[0] in href or href.startswith('/'):
                 full_url = response.urljoin(href)
 
                 # Skip static asset files
                 if full_url.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.svg', '.webp', '.bmp')):
                     continue
 
-                if full_url not in self.scheduled_urls:
-                    self.scheduled_urls.add(full_url)
-                    yield response.follow(href, self.parse)
-
-    def closed(self, reason):
-        # Save state
-        self.state["scheduled_urls"] = list(self.scheduled_urls)
-        self.state["pages_crawled"] = self.pages_crawled
-        # Final estimation
-        self.run_estimation()
+                yield response.follow(href, self.parse)

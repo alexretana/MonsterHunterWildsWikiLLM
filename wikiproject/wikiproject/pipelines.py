@@ -12,6 +12,7 @@ from rich.tree import Tree
 from rich import print
 import pandas as pd
 import json
+import os
 
 class WikiprojectPipeline:
     def dedupe_and_build_breadcrumb_map(self):
@@ -37,7 +38,8 @@ class WikiprojectPipeline:
                     nodes[partial] = parent.add(part)
                 parent = nodes[partial]
         
-        return tree
+        total_page_count = len(outputDf)
+        return tree, total_page_count
 
     def open_spider(self, spider):
         today = datetime.today().strftime("%Y-%m-%d")
@@ -46,13 +48,28 @@ class WikiprojectPipeline:
     def close_spider(self, spider):
         self.file.close()
 
-        breadcrumb_map = self.dedupe_and_build_breadcrumb_map()
+        jobdir = spider.settings.get('JOBDIR')
+        active_requests_file = os.path.join(jobdir, 'requests.queue', 'active.json')
+
+        remaining_requests = 0
+        if os.path.exists(active_requests_file):
+            with open(active_requests_file, 'r', encoding='utf-8') as f:
+                try:
+                    queue_data = json.load(f)
+                    remaining_requests = len(queue_data)
+                except json.JSONDecodeError:
+                    remaining_requests = 0
+
+        breadcrumb_map, total_page_count = self.dedupe_and_build_breadcrumb_map()
         console = Console(record=True)
-        console.print(tree)
+        console.print(breadcrumb_map)
         output = console.export_text()
 
         with open('./output/fextralife-monsterhunterwildswiki-breadcrumb-map.txt', 'w', encoding='utf-8') as f:
             f.write(output)
+
+        print(f"Total Pages Already Scraped And Stored: {total_page_count}")
+        print(f"Queued Requests Leftover After Early Stop: {remaining_requests}")
 
     def process_item(self, item, spider):
         line = json.dumps(dict(item)) + "\n"
