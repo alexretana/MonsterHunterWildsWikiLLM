@@ -167,6 +167,7 @@ Page Tables Stored as JSON (copy below)
             'breadcrumb': breadcrumb,
             'breadcrumb&title': breadcrumb + "/" + title,
             'wiki_content': wiki_doc,
+            'updatedAt': datetime.utcnow().isoformat()
         }
         # Every N pages, run estimate
         if self.pages_crawled % self.ESTIMATION_INTERVAL == 0:
