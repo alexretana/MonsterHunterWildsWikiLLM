@@ -1,19 +1,22 @@
 import scrapy
-from collections import Counter
 from datetime import datetime
 import logging
+import json
+from scrapy.selector import Selector
 
 class MyFextralifeSpider(scrapy.Spider):
     name = "myfextralifespider"
     allowed_domains = ["monsterhunterwilds.wiki.fextralife.com"]
     start_urls = ["https://monsterhunterwilds.wiki.fextralife.com/Monster+Hunter+Wilds+Wiki"]
-    url_counter = Counter()
+
+    # track scheduled unique URLs
+    scheduled_urls = set()
     pages_crawled = 0
     ESTIMATION_INTERVAL = 10
 
     custom_settings = {
         "JOBDIR": f'jobs/daily-fextralife-{datetime.today().strftime("%Y-%m-%d")}',
-        "CLOSESPIDER_TIMEOUT": 300,
+        "CLOSESPIDER_TIMEOUT": 3600,
         "ITEM_PIPELINES": {
             'wikiproject.pipelines.WikiprojectPipeline': 300,
         },
@@ -25,45 +28,35 @@ class MyFextralifeSpider(scrapy.Spider):
     }
 
     def run_estimation(self):
-        f1 = sum(1 for c in self.url_counter.values() if c == 1)
-        f2 = sum(1 for c in self.url_counter.values() if c == 2)
-        u = len(self.url_counter)
+        pages_scheduled = len(self.scheduled_urls)
+        pages_crawled = self.pages_crawled
 
-        logging.info(f"[Estimation] Unique discovered URLs: {u}")
-        logging.info(f"[Estimation] f(singletons): {f1}, f2(doubletons): {f2}")
+        if pages_scheduled > 0:
+            percent_complete = pages_crawled / pages_scheduled * 100
+            estimated_remaining = pages_scheduled - pages_crawled
 
-        if f2 > 0:
-            u_total = u + (f1 ** 2) / (2 * f2)
-            estimated_left = u_total - u
-            estimated_percentage_left = estimated_left / u_total * 100 # %
-            logging.info(f"[Estimation] Estimate total unique URLs(Chao1): {u_total:.0f}")
-            logging.info(f"[Estimation] Estimate pages left: {estimated_left:.0f} ({estimated_percentage_left:.2f}% of Estimated Total)")
-
-            self.crawler.stats.set_value('estimation/unique_urls', u)
-            self.crawler.stats.set_value('estimation/u_total', u_total)
-            self.crawler.stats.set_value('estimation/estimated_remaining', estimated_left)
-            self.crawler.stats.set_value('estimation/estimated_remaining_percentage', estimated_percentage_left)
+            logging.info(f"[Estimation] Scheduled unique URLs: {pages_scheduled}")
+            logging.info(f"[Estimation] Pages crawled: {pages_crawled}")
+            logging.info(f"[Estimation] Remaining: {estimated_remaining} ({percent_complete:.2f}% complete)")
 
 
+            self.crawler.stats.set_value('estimation/scheduled', pages_scheduled)
+            self.crawler.stats.set_value('estimation/crawled', pages_crawled)
+            self.crawler.stats.set_value('estimation/remaining', estimated_remaining)
+            self.crawler.stats.set_value('estimation/percent_complete', percent_complete)
         else:
-            logging.info("[Estimation] Not enough data to estimate total unique URLs")
-            fraction_singletons = f1 / u if u else 0
-            if fraction_singletons > 0.5:
-                logging.info("[Estimation] Possibly in EARLY phase: still finding lots of new unique URLs")
-            else:
-                logging.info("[Estimation] Possibly in LATE phase: most discovered URLs are repeated, few are unique")
+            logging.info("[Estimate] No pages scheduled yet.")
 
-    def parse_breadcrumb(self, response):
-        breadcrumb_tags = "/" + "/".join([x for x in response.css('div.breadcrumb-wrapper a::text').getall() if x != '+'])
+    def parse_breadcrumb(self, sel):
+        breadcrumb_tags = "/" + "/".join([x for x in sel.css('div.breadcrumb-wrapper a::text').getall() if x != '+'])
         return breadcrumb_tags
 
-    def parse_wiki_content(self, response):
-        sel = response.selector
+    def parse_wiki_content(self, sel):
         wikicontent = (" ".join([x.strip() for x in sel.xpath('//div[@id="wiki-content-block"]//text()').getall()])).replace('\xa0', ' ')
         return wikicontent
 
-    def parse_wiki_tables(self, response):
-        sel = response.selector
+    def parse_wiki_tables(self, html):
+        sel = Selector(text=html)
         tables = sel.xpath('//table[@class="wiki_table"]').getall()
 
         normalized_data = []
@@ -82,7 +75,7 @@ class MyFextralifeSpider(scrapy.Spider):
                 headers = first_tr.xpath('./th//text() | ./td//text()').getall()
                 headers = [h.strip() for h in headers if h.strip()]
 
-            # Extract ros, skipping header row if no thead
+            # Extract rows, skipping header row if no thead
             if thead:
                 rows = table_sel.xpath('./tbody/tr')
             else:
@@ -99,7 +92,7 @@ class MyFextralifeSpider(scrapy.Spider):
                     nested_table = cell.xpath('.//table')
                     if nested_table:
                         nested_html = nested_table.get()
-                        nested_html = parser_table_with_selector(nested_html)
+                        nested_data = self.parse_wiki_tables(nested_html)
                         row_data.append(nested_data)
                     else: 
                         # Prefer alt or title if image present
@@ -123,29 +116,32 @@ class MyFextralifeSpider(scrapy.Spider):
                 r += [''] * (max_len - len(r))
                 normalized_data.append(dict(zip(headers, r)))
 
-        return json.dumps(normalized_data,indent=2)
+        return normalized_data
 
     def make_wiki_doc(self, response):
         title = response.url.split("/")[-1]
-        breadcrumb = self.parse_breadcrumb(response)
+        sel = response.selector
 
-        wiki_content = self.parse_wiki_content(response)
+        breadcrumb = self.parse_breadcrumb(sel)
 
-        table_json_dump = self.parse_wiki_tables(response)
+        wiki_content = self.parse_wiki_content(sel)
+
+        page_html = sel.css('html').get()
+        table_json_dump = json.dumps(self.parse_wiki_tables(page_html), indent=2)
         
         wiki_doc = f"""
-            If the user's answer is answered by information in this file, please direct them to {response.url}
-            URL: {response.url}
-            ####################
-            Page Title: {title}
-            ####################
-            Breadcrumb: {breadcrumb}
-            ####################
-            Page Content:
-            {wiki_content}
-            ####################
-            Page Tables Stored as JSONs
-            {table_json_dump}
+If the user's answer is answered by information in this file, please direct them to {response.url}
+URL: {response.url}
+####################
+Page Title: {title}
+####################
+Breadcrumb: {breadcrumb}
+####################
+Page Content:
+{wiki_content}
+####################
+Page Tables Stored as JSON (copy below)
+{table_json_dump}
         """
 
         return title, breadcrumb, wiki_doc
@@ -153,13 +149,17 @@ class MyFextralifeSpider(scrapy.Spider):
 
     def parse(self, response):
         # Restore state if first page in session
-        if self.pages_crawled == 0 and "url_counter" in self.state:
-            self.url_counter = Counter(self.state["url_counter"])
+        if self.pages_crawled == 0 and "scheduled_urls" in self.state:
+            self.scheduled_urls = set(self.state["scheduled_urls"])
             self.pages_crawled = self.state.get("pages_crawled", 0)
 
         self.pages_crawled += 1
 
         title, breadcrumb, wiki_doc = self.make_wiki_doc(response)
+
+        doc_filename = f'./output/documents/{(breadcrumb + "-" + title).replace("/","-").strip("-")}.txt'
+        with open(doc_filename, 'w', encoding='utf-8') as f:
+            f.write(wiki_doc)
 
         yield {
             'url': response.url,
@@ -180,15 +180,13 @@ class MyFextralifeSpider(scrapy.Spider):
                 if full_url.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.svg', '.webp', '.bmp')):
                     continue
 
-                self.url_counter[full_url] += 1
-
-                if self.url_counter[full_url] == 1:
-
+                if full_url not in self.scheduled_urls:
+                    self.scheduled_urls.add(full_url)
                     yield response.follow(href, self.parse)
 
     def closed(self, reason):
         # Save state
-        self.state["url_counter"] = dict(self.url_counter)
+        self.state["scheduled_urls"] = list(self.scheduled_urls)
         self.state["pages_crawled"] = self.pages_crawled
         # Final estimation
         self.run_estimation()

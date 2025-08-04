@@ -16,8 +16,8 @@ class WikiprojectPipeline:
     def dedupe_and_build_breadcrumb_map(self):
         # read in data, dedupe, rewrite
         filename = './output/fextralife-monsterhunterwildswiki.jsonl'
-        with open(filename, 'r', encoding='utf-8'):
-            data = [json.loads(line) for line in self.file]
+        with open(filename, 'r', encoding='utf-8') as f:
+            data = [json.loads(line) for line in f]
         outputDf = pd.DataFrame(data).drop_duplicates(subset=['url'], keep='last')
         outputDf.to_json(filename, orient='records', lines=True)
 
@@ -27,7 +27,7 @@ class WikiprojectPipeline:
         nodes = {}
 
         for breadCrumb in breadCrumbs:
-            parts = [p for p in path.split('/') if p]
+            parts = [p for p in breadCrumb.split('/') if p]
             parent = tree
             partial = ""
             for part in parts:
@@ -36,7 +36,7 @@ class WikiprojectPipeline:
                     nodes[partial] = parent.add(part)
                 parent = nodes[partial]
         
-        return tree
+        return str(tree)
 
     def open_spider(self, spider):
         today = datetime.today().strftime("%Y-%m-%d")
@@ -44,9 +44,11 @@ class WikiprojectPipeline:
 
     def close_spider(self, spider):
         self.file.close()
-        breadcrumb_map = self.build_breadcrumb_map()
+        breadcrumb_map = self.dedupe_and_build_breadcrumb_map()
         with open('./output/fextralife-monsterhunterwildswiki-breadcrumb-map.txt', 'w', encoding='utf-8') as f:
-            f.write(breadcrump_map)
+            f.write(breadcrumb_map)
+
+        print(breadcrumb_map)
 
     def process_item(self, item, spider):
         line = json.dumps(dict(item)) + "\n"
