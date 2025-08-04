@@ -7,6 +7,7 @@
 # useful for handling different item types with a single interface
 from itemadapter import ItemAdapter
 from  datetime import datetime
+from rich.console import Console
 from rich.tree import Tree
 from rich import print
 import pandas as pd
@@ -36,7 +37,7 @@ class WikiprojectPipeline:
                     nodes[partial] = parent.add(part)
                 parent = nodes[partial]
         
-        return str(tree)
+        return tree
 
     def open_spider(self, spider):
         today = datetime.today().strftime("%Y-%m-%d")
@@ -44,11 +45,14 @@ class WikiprojectPipeline:
 
     def close_spider(self, spider):
         self.file.close()
-        breadcrumb_map = self.dedupe_and_build_breadcrumb_map()
-        with open('./output/fextralife-monsterhunterwildswiki-breadcrumb-map.txt', 'w', encoding='utf-8') as f:
-            f.write(breadcrumb_map)
 
-        print(breadcrumb_map)
+        breadcrumb_map = self.dedupe_and_build_breadcrumb_map()
+        console = Console(record=True)
+        console.print(tree)
+        output = console.export_text()
+
+        with open('./output/fextralife-monsterhunterwildswiki-breadcrumb-map.txt', 'w', encoding='utf-8') as f:
+            f.write(output)
 
     def process_item(self, item, spider):
         line = json.dumps(dict(item)) + "\n"
