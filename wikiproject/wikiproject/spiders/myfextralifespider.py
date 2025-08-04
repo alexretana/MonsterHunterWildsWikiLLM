@@ -15,7 +15,7 @@ class MyFextralifeSpider(scrapy.Spider):
         "JOBDIR": f'jobs/daily-fextralife-{datetime.today().strftime("%Y-%m-%d")}',
         "CLOSESPIDER_TIMEOUT": 300,
         "ITEM_PIPELINES": {
-            'wikiproject.pipelines.Daily_WikiprojectPipeline': 300,
+            'wikiproject.pipelines.WikiprojectPipeline': 300,
         },
         "DEPTH_LIMIT": 6,
         "LOG_LEVEL": "INFO",
@@ -53,6 +53,104 @@ class MyFextralifeSpider(scrapy.Spider):
             else:
                 logging.info("[Estimation] Possibly in LATE phase: most discovered URLs are repeated, few are unique")
 
+    def parse_breadcrumb(self, response):
+        breadcrumb_tags = "/" + "/".join([x for x in response.css('div.breadcrumb-wrapper a::text').getall() if x != '+'])
+        return breadcrumb_tags
+
+    def parse_wiki_content(self, response):
+        sel = response.selector
+        wikicontent = (" ".join([x.strip() for x in sel.xpath('//div[@id="wiki-content-block"]//text()').getall()])).replace('\xa0', ' ')
+        return wikicontent
+
+    def parse_wiki_tables(self, response):
+        sel = response.selector
+        tables = sel.xpath('//table[@class="wiki_table"]').getall()
+
+        normalized_data = []
+
+        for table_html in tables:
+            table_sel = Selector(text=table_html)
+            
+            # Extract headers from <thead> if present, else first <tr>
+            headers = []
+            thead = table_sel.xpath('./thead')
+            if thead:
+                headers = thead.xpath('.//th//text()').getall()
+                headers = [h.strip() for h in headers if h.strip()]
+            else:
+                first_tr = table_sel.xpath('.//tr')[0]
+                headers = first_tr.xpath('./th//text() | ./td//text()').getall()
+                headers = [h.strip() for h in headers if h.strip()]
+
+            # Extract ros, skipping header row if no thead
+            if thead:
+                rows = table_sel.xpath('./tbody/tr')
+            else:
+                rows = table_sel.xpath('.//tr')[1:] # skip first header row
+
+            data = []
+            max_len = len(headers)
+
+            for row in rows:
+                cells = row.xpath('./th | ./td')
+                row_data = []
+                for cell in cells:
+                    # Check for nested table inside cell
+                    nested_table = cell.xpath('.//table')
+                    if nested_table:
+                        nested_html = nested_table.get()
+                        nested_html = parser_table_with_selector(nested_html)
+                        row_data.append(nested_data)
+                    else: 
+                        # Prefer alt or title if image present
+                        img = cell.xpath('.//img')
+                        if img:
+                            alt = img.xpath('./@alt').get()
+                            title = img.xpath('./@title').get()
+                            text = alt or title or cell.xpath('string(.)').get()
+                        else:
+                            text = cell.xpath('string(.)').get()
+                        row_data.append(text.strip() if text else '')
+
+                max_len = max(max_len, len(row_data))
+                data.append(row_data)
+
+            # Pad headers or rows to max_len
+            if len(headers) < max_len:
+                headers += [f"Extra_{i}" for i in range(max_len - len(headers))]
+
+            for r in data:
+                r += [''] * (max_len - len(r))
+                normalized_data.append(dict(zip(headers, r)))
+
+        return json.dumps(normalized_data,indent=2)
+
+    def make_wiki_doc(self, response):
+        title = response.url.split("/")[-1]
+        breadcrumb = self.parse_breadcrumb(response)
+
+        wiki_content = self.parse_wiki_content(response)
+
+        table_json_dump = self.parse_wiki_tables(response)
+        
+        wiki_doc = f"""
+            If the user's answer is answered by information in this file, please direct them to {response.url}
+            URL: {response.url}
+            ####################
+            Page Title: {title}
+            ####################
+            Breadcrumb: {breadcrumb}
+            ####################
+            Page Content:
+            {wiki_content}
+            ####################
+            Page Tables Stored as JSONs
+            {table_json_dump}
+        """
+
+        return title, breadcrumb, wiki_doc
+
+
     def parse(self, response):
         # Restore state if first page in session
         if self.pages_crawled == 0 and "url_counter" in self.state:
@@ -61,9 +159,14 @@ class MyFextralifeSpider(scrapy.Spider):
 
         self.pages_crawled += 1
 
+        title, breadcrumb, wiki_doc = self.make_wiki_doc(response)
+
         yield {
             'url': response.url,
-            'content': response.text
+            'title': title,
+            'breadcrumb': breadcrumb,
+            'breadcrumb&title': breadcrumb + "/" + title,
+            'wiki_content': wiki_doc,
         }
         # Every N pages, run estimate
         if self.pages_crawled % self.ESTIMATION_INTERVAL == 0:
@@ -77,8 +180,9 @@ class MyFextralifeSpider(scrapy.Spider):
                 if full_url.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.svg', '.webp', '.bmp')):
                     continue
 
-                if self.url_counter[full_url] == 0:
-                    self.url_counter[full_url] += 1
+                self.url_counter[full_url] += 1
+
+                if self.url_counter[full_url] == 1:
 
                     yield response.follow(href, self.parse)
 
