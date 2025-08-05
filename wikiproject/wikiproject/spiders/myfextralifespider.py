@@ -8,7 +8,7 @@ def safe_list_get(listvar, idx, default):
     try:
         return listvar[idx]
     except IndexError:
-        default
+        return default
 
 class MyFextralifeSpider(scrapy.Spider):
     name = "myfextralifespider"
@@ -156,6 +156,9 @@ Page Tables Stored as JSON (copy below)
 
                 # Skip static asset files
                 if full_url.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.svg', '.webp', '.bmp')):
+                    continue
+
+                if href.startswith("mailto:") or href.startswith("tel:"):
                     continue
 
                 yield response.follow(href, self.parse)
