@@ -142,10 +142,11 @@ Page Tables Stored as JSON (copy below)
             'url': response.url,
             'title': title,
             'breadcrumb': breadcrumb,
-            'secondbreadcrump': second_breadcrumb, # used specifically for Open WebUI Knowledge grouping
+            'secondbreadcrumb': second_breadcrumb, # used specifically for Open WebUI Knowledge grouping
             'breadcrumb&title': breadcrumb + "/" + title,
             'wiki_content': wiki_doc,
             'doc_filepath': doc_filename,
+            'remote_file_id': "",
             'updatedAt': datetime.utcnow().isoformat()
         }
 
