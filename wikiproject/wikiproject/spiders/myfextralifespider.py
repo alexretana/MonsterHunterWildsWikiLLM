@@ -4,6 +4,12 @@ import logging
 import json
 from scrapy.selector import Selector
 
+def safe_list_get(listvar, idx, default):
+    try:
+        return listvar[idx]
+    except IndexError:
+        default
+
 class MyFextralifeSpider(scrapy.Spider):
     name = "myfextralifespider"
     allowed_domains = ["monsterhunterwilds.wiki.fextralife.com"]
@@ -25,7 +31,8 @@ class MyFextralifeSpider(scrapy.Spider):
 
     def parse_breadcrumb(self, sel):
         breadcrumb_tags = "/" + "/".join([x for x in sel.css('div.breadcrumb-wrapper a::text').getall() if x != '+'])
-        return breadcrumb_tags
+        second_breadcrumb = str(safe_list_get(x.split('/'), 2, 0))
+        return breadcrumb_tags, second_breadcrumb
 
     def parse_wiki_content(self, sel):
         wikicontent = (" ".join([x.strip() for x in sel.xpath('//div[@id="wiki-content-block"]//text()').getall()])).replace('\xa0', ' ')
@@ -98,7 +105,7 @@ class MyFextralifeSpider(scrapy.Spider):
         title = response.url.split("/")[-1]
         sel = Selector(text=html_node)
 
-        breadcrumb = self.parse_breadcrumb(sel)
+        breadcrumb, second_breadcrumb = self.parse_breadcrumb(sel)
 
         wiki_content = self.parse_wiki_content(sel)
 
@@ -119,13 +126,13 @@ Page Tables Stored as JSON (copy below)
 {table_json_dump}
         """
 
-        return title, breadcrumb, wiki_doc
+        return title, breadcrumb, second_breadcrumb, wiki_doc
 
 
     def parse(self, response):
         html_node = response.css('html').get()
 
-        title, breadcrumb, wiki_doc = self.make_wiki_doc(response, html_node)
+        title, breadcrumb, second_breadcrumb, wiki_doc = self.make_wiki_doc(response, html_node)
 
         doc_filename = f'./output/documents/{(breadcrumb + "-" + title).replace("/","-").strip("-")}.txt'
         with open(doc_filename, 'w', encoding='utf-8') as f:
@@ -135,6 +142,7 @@ Page Tables Stored as JSON (copy below)
             'url': response.url,
             'title': title,
             'breadcrumb': breadcrumb,
+            'secondbreadcrump': second_breadcrumb, # used specifically for Open WebUI Knowledge grouping
             'breadcrumb&title': breadcrumb + "/" + title,
             'wiki_content': wiki_doc,
             'updatedAt': datetime.utcnow().isoformat()
