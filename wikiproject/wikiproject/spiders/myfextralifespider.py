@@ -145,6 +145,7 @@ Page Tables Stored as JSON (copy below)
             'secondbreadcrump': second_breadcrumb, # used specifically for Open WebUI Knowledge grouping
             'breadcrumb&title': breadcrumb + "/" + title,
             'wiki_content': wiki_doc,
+            'doc_filepath': doc_filename,
             'updatedAt': datetime.utcnow().isoformat()
         }
 

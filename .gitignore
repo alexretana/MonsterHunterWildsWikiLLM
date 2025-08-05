@@ -40,4 +40,7 @@ Thubms.db
 # Open WebUI secret
 .webui_secret_key
 
+# file that stores open-webui api-key
+wikiproject/.open_webui_api_key
+
 */.ipynb_checkpoints/
