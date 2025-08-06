@@ -1,0 +1,3 @@
+[submodule "external/open-webui-8-6-2025"]
+	path = external/open-webui-8-6-2025
+	url = https://github.com/alexretana/open-webui-8-6-2025.git
