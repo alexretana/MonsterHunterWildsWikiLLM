@@ -1,4 +1,5 @@
 import pandas as pd
+from tqdm import tqdm
 import requests
 import json
 import os
@@ -118,7 +119,7 @@ def upload_or_update_files(df, remote_files):
     """
     knowledge_ids = { knowledge['name']: knowledge['id'] for knowledge in get_knowledge_list() }
 
-    for idx, row in df.iterrows():
+    for idx, row in tqdm(df.iterrows(), desc=""):
         filepath = str(row["doc_filepath"])
         filename = os.path.basename(filepath)
         knowledge_name = row.get("secondbreadcrumb", "Misc")
@@ -126,12 +127,12 @@ def upload_or_update_files(df, remote_files):
         knowledge_id = knowledge_ids[knowledge_name]
 
         if filename not in remote_files:
-            print(f"Uploading new file: {filename} to {knowledge_name}({knowledge_id})")
+            tqdm.write(f"Uploading new file: {filename} to {knowledge_name}({knowledge_id})")
             file_id = upload_file(filepath, knowledge_id)
             df.at[idx, "remote_file_id"] = file_id
         else:
             file_id = remote_files[filename]
-            print(f"Updating existing file: {filename}({file_id}) in {knowledge_name}({knowledge_id})")
+            tqdm.write(f"Updating existing file: {filename}({file_id}) in {knowledge_name}({knowledge_id})")
             update_file_content(filepath, file_id)
             df.at[idx, "remote_file_id"] = file_id
 
