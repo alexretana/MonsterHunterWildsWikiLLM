@@ -33,8 +33,9 @@ The scraped data is then processed and uploaded to an **Open WebUI** knowledge b
 
 Clone this repo:
 ```bash
-git clone https://github.com/YOURUSERNAME/YOURREPO.git
-cd YOURREPO
+git clone https://github.com/alexretana/MonsterHunterWildsWikiLLM.git
+cd MonsterHunterWildsWikiLLM
+git submodule update --init --recursive
 ```
 
 Create the Conda environment:
