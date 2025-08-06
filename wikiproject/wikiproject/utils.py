@@ -39,7 +39,6 @@ def print_response_error(response):
     
 def get_remote_files():
     full_url = OPEN_WEBUI_DOMAIN_NAME + ":8080/api/v1/files/"
-    api_key = read_dot_api_key()
     headers = make_headers()
     response = requests.get(url=full_url, headers=headers)
     if response.status_code not in range(200, 299):
@@ -52,7 +51,6 @@ def get_remote_files():
 def get_knowledge_list():
     # Check if collections already exists
     full_url = OPEN_WEBUI_DOMAIN_NAME + ":8080/api/v1/knowledge/list"
-    api_key = read_dot_api_key()
     headers = make_headers()
     response = requests.get(url=full_url, headers=headers)
     # Exit early if api call fails
@@ -66,15 +64,27 @@ def get_knowledge_list():
 def upload_file(filepath, knowledge_id):
     # First Upload File to Open Web UI
     full_url = OPEN_WEBUI_DOMAIN_NAME + ":8080/api/v1/files/"
-    headers = make_headers()
-    files = {"file": open(filepath, 'rb')}
+    api_key = read_dot_api_key()
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Accept": "application/json"
+    }
+    file_data = None
+    try:
+        file_data = open(filepath, 'rb')
+    except FileNotFoundError:
+        print(f"File Not Found when looking for: '{filepath}'")
+        return ""
+    files = {"file": file_data}
     upload_response = requests.post(url=full_url, headers=headers, files=files)
     if upload_response.status_code not in range(200, 299):
+        print(f"[Error Report] filename: {filepath}")
+        print(f"[Error Report] file_data: {file_data}")
         print_response_error(upload_response)
         return ""
 
     upload_response_json = upload_response.json()
-    file_upload_name = upload_response_json['name']
+    file_upload_name = upload_response_json['filename']
     file_id = upload_response_json["id"]
     print(f"Uploaded file: '{file_upload_name}'")
 
@@ -106,10 +116,10 @@ def upload_or_update_files(df, remote_files):
     note: df should be outputDf read from .jsonl, 
     and this will return outputDf with file_ids
     """
-    knowledge_ids = { knowledge['name']: knowledge['id'] for knowledge in get_knowledge_list().items() }
+    knowledge_ids = { knowledge['name']: knowledge['id'] for knowledge in get_knowledge_list() }
 
     for idx, row in df.iterrows():
-        filepath = row["doc_filepath"]
+        filepath = str(row["doc_filepath"])
         filename = os.path.basename(filepath)
         knowledge_name = row.get("secondbreadcrumb", "Misc")
         knowledge_name = knowledge_name if knowledge_name in KNOWLEDGE_LIST else "Misc"

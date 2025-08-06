@@ -2,6 +2,7 @@ import scrapy
 from datetime import datetime
 import logging
 import json
+from urllib.parse import urlparse
 from scrapy.selector import Selector
 
 def safe_list_get(listvar, idx, default):
@@ -159,9 +160,11 @@ Page Tables Stored as JSON (copy below)
         for href in response.css('a::attr(href)').getall():
             if href and self.allowed_domains[0] in href or href.startswith('/'):
                 full_url = response.urljoin(href)
+                parsed = urlparse(full_url)
+                path = parsed.path.lower()
 
                 # Skip static asset files
-                if full_url.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.svg', '.webp', '.bmp')):
+                if path.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.svg', '.webp', '.bmp')):
                     continue
 
                 if href.startswith("mailto:") or href.startswith("tel:"):
