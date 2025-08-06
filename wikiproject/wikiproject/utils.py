@@ -18,6 +18,8 @@ def read_dot_api_key():
                 _API_KEY = f.read().strip()
             if _API_KEY is None:
                 raise ValueError("API key not found in file or environment.")
+        except FileNotFoundError:
+            raise FileNotFoundError("'.open_webui_api_key' file not found.")
     return _API_KEY
 
 def make_headers(extra_headers: dict = None):
@@ -43,7 +45,9 @@ def get_remote_files():
     if response.status_code not in range(200, 299):
         return print_response_error(response)
     response_json = response.json()
-    return {file["name"]: file["id"] for file in response_json}
+    if not response_json:
+        return {}
+    return {file["filename"]: file["id"] for file in response_json}
 
 def get_knowledge_list():
     # Check if collections already exists

@@ -31,7 +31,7 @@ class MyFextralifeSpider(scrapy.Spider):
 
     def parse_breadcrumb(self, sel):
         breadcrumb_tags = "/" + "/".join([x for x in sel.css('div.breadcrumb-wrapper a::text').getall() if x != '+'])
-        second_breadcrumb = str(safe_list_get(x.split('/'), 2, 0))
+        second_breadcrumb = str(safe_list_get(breadcrumb_tags.split('/'), 2, 0))
         return breadcrumb_tags, second_breadcrumb
 
     def parse_wiki_content(self, sel):
@@ -130,7 +130,13 @@ Page Tables Stored as JSON (copy below)
 
 
     def parse(self, response):
-        html_node = response.css('html').get()
+        html_node = None
+        try:
+            html_node = response.css('html').get()
+        except Exception as e:
+            print('Failed to parse website because the response was not html text')
+            print(f'This was caused by the response from requesting: {response.url}')
+            return
 
         title, breadcrumb, second_breadcrumb, wiki_doc = self.make_wiki_doc(response, html_node)
 
