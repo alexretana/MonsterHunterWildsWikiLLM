@@ -57,50 +57,50 @@ def get_knowledge_list():
     return { knowledge['name']: knowledge['id'] for knowledge in response_json }
 
 class Pipeline:
-	def __init__(self):
-		self.model = SentenceTransformer("all-MiniLm-L6-v2")
-		self.collection_texts = {
-			"Weapon": "Weapons in Monster Hunter: Wilds define your combat style, with 14 unique types ranging from nimble Dual Blades to massive Greatswords and technical options like the Charge Blade or Hunting Horn, each with their own combos, mechanics, and upgrade trees. Great Sword Sword & Shield Dual Blades Long Sword Hunting Horn Lance Gunlance Hammer Switch Axe Charge Blade Insect Glaive  Bow  Light Bowgun  Heavy Bowgun",
-			"Armor": "Armor provides both defense and passive skills, crafted from monster parts and upgraded over time; full sets can grant set bonuses, and mixing pieces lets hunters optimize builds around specific resistances and abilities. Each set includes hemls chests arms waists and legs.",
-			"Items": "Items include consumables like Potions, Traps, Bombs, and Ammo used for survival, utility, and strategy during hunts, with many crafted from gathered materials in the field or managed through the item box and crafting lists.",
-			"Decorations": "Decorations are slottable jewels that enhance skills on your gear, offering flexible build customization once you’ve progressed far enough to unlock high-rank gear and start farming tempered monsters for rare drops.",
-			"Misc": "Misc covers everything else, including NPCs like the Smithy or Handler, quest types (story, optional, investigations, events), endemic life, locations like Astera and the Guiding Lands, and systems like bounties, melding, and the ecosystem interactions that make the world feel alive."
-		}
-		self.collection_embeddings = None
-		self.collection_ids = get_knowledge_list()
+    def __init__(self):
+        self.model = SentenceTransformer("all-MiniLm-L6-v2")
+        self.collection_texts = {
+            "Weapon": "Weapons in Monster Hunter: Wilds define your combat style, with 14 unique types ranging from nimble Dual Blades to massive Greatswords and technical options like the Charge Blade or Hunting Horn, each with their own combos, mechanics, and upgrade trees. Great Sword Sword & Shield Dual Blades Long Sword Hunting Horn Lance Gunlance Hammer Switch Axe Charge Blade Insect Glaive  Bow  Light Bowgun  Heavy Bowgun",
+            "Armor": "Armor provides both defense and passive skills, crafted from monster parts and upgraded over time; full sets can grant set bonuses, and mixing pieces lets hunters optimize builds around specific resistances and abilities. Each set includes hemls chests arms waists and legs.",
+            "Items": "Items include consumables like Potions, Traps, Bombs, and Ammo used for survival, utility, and strategy during hunts, with many crafted from gathered materials in the field or managed through the item box and crafting lists.",
+            "Decorations": "Decorations are slottable jewels that enhance skills on your gear, offering flexible build customization once you’ve progressed far enough to unlock high-rank gear and start farming tempered monsters for rare drops.",
+            "Misc": "Misc covers everything else, including NPCs like the Smithy or Handler, quest types (story, optional, investigations, events), endemic life, locations like Astera and the Guiding Lands, and systems like bounties, melding, and the ecosystem interactions that make the world feel alive."
+        }
+        self.collection_embeddings = None
+        self.collection_ids = get_knowledge_list()
 
     async def on_startup(self):
         # Precompute embeddings at startup
-		self.collection_embeddings= {
-			name: self.model.encode(desc)
-			for name, desc in self.collection_texts.items()
-		}
+        self.collection_embeddings= {
+            name: self.model.encode(desc)
+            for name, desc in self.collection_texts.items()
+        }
 
     async def on_shutdown(self):
         # This function is called when the server is stopped.
         pass
-	
-	def get_top_collections(self, query: str, top_k: int = 2):
-		query_vec = self.model.encode(query)
-		scores = {
-			name: cosine_similarity(
-				[query_vec], [self.collecition_embeddings[name]]
-			)[0][0]
-			for name in self.collection_embeddings
-		}
-		sorted_names = sorted(scores, key=scores.get, reverse=True)[:top_k]
-		return sorted_names
+    
+    def get_top_collections(self, query: str, top_k: int = 2):
+        query_vec = self.model.encode(query)
+        scores = {
+            name: cosine_similarity(
+                [query_vec], [self.collecition_embeddings[name]]
+            )[0][0]
+            for name in self.collection_embeddings
+        }
+        sorted_names = sorted(scores, key=scores.get, reverse=True)[:top_k]
+        return sorted_names
 
     def pipe(
         self, user_message: str, model_id: str, messages: List[dict], body: dict
     ) -> Union[str, Generator, Iterator]:
 
-		top_collection = self.get_top_collections(user_message)
+        top_collection = self.get_top_collections(user_message)
 
         return  {
-			"prompt": user_message,
-			"collection": [
-				{"type": "collection", "id": self.collection_ids[name]}
-				for name in top_collections
-			],
-		}
+            "prompt": user_message,
+            "collection": [
+                {"type": "collection", "id": self.collection_ids[name]}
+                for name in top_collections
+            ],
+        }
