@@ -119,7 +119,7 @@ def upload_or_update_files(df, remote_files):
     """
     knowledge_ids = { knowledge['name']: knowledge['id'] for knowledge in get_knowledge_list() }
 
-    for idx, row in tqdm(df.iterrows(), desc=""):
+    for idx, row in tqdm(df.iterrows(), desc="Uploading/Updating files to Open Web UI Server"):
         filepath = str(row["doc_filepath"])
         filename = os.path.basename(filepath)
         knowledge_name = row.get("secondbreadcrumb", "Misc")
