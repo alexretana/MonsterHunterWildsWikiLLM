@@ -18,14 +18,15 @@ import json
 import os
 
 OPEN_WEBUI_DOMAIN_NAME = 'http://localhost'
-KNOWLEDGE_LIST = ['Weapons', 'Armor', 'Items', 'Decorations', 'Misc']
 
 
 class WikiprojectPipeline:
     def open_spider(self, spider):
         today = datetime.today().strftime("%Y-%m-%d")
         self.file = open('./output/fextralife-monsterhunterwildswiki.jsonl', 'a', encoding='utf-8')
-        create_all_collections()
+        
+        # Optionally purge OpenWebUI files once (can be enabled/disabled as needed)
+        # purge_openwebui()
 
     def close_spider(self, spider):
         self.file.close()
@@ -52,6 +53,7 @@ class WikiprojectPipeline:
 
         print(f"Total Pages Already Scraped And Stored: {total_page_count}")
         print(f"Queued Requests Leftover After Early Stop: {remaining_requests}")
+        print("Data has been ingested into Chroma vector store via dedupe_and_build_breadcrumb_map()")
 
     def process_item(self, item, spider):
         line = json.dumps(dict(item)) + "\n"

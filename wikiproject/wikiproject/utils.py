@@ -3,9 +3,14 @@ from tqdm import tqdm
 import requests
 import json
 import os
+from rich.tree import Tree
+
+# Chroma/LlamaIndex imports
+from llama_index.vector_stores.chroma import ChromaVectorStore
+from llama_index.core import VectorStoreIndex, Document
+from llama_index.embeddings.ollama import OllamaEmbedding
 
 OPEN_WEBUI_DOMAIN_NAME = 'http://localhost'
-KNOWLEDGE_LIST = ['Weapons', 'Armor', 'Items', 'Decorations', 'Misc']
 _API_KEY = None
 
 DOCUMENTS_DIR = "./output/documents"
@@ -37,18 +42,51 @@ def print_response_error(response):
     error_message = f"Recieved Non-Successful Status Code({response.status_code}), and message :{response.text}"
     print(error_message)
     return error_message
-    
-def get_remote_files():
-    full_url = OPEN_WEBUI_DOMAIN_NAME + ":8080/api/v1/files/"
+
+def purge_openwebui():
+    """Optional function to purge all files from OpenWebUI"""
+    full_url = OPEN_WEBUI_DOMAIN_NAME + ":8080/api/v1/files/all"
     headers = make_headers()
-    response = requests.get(url=full_url, headers=headers)
+    response = requests.delete(url=full_url, headers=headers)
     if response.status_code not in range(200, 299):
         return print_response_error(response)
-    response_json = response.json()
-    if not response_json:
-        return {}
-    return {file["filename"]: file["id"] for file in response_json}
+    print("Successfully purged all files from OpenWebUI")
+    return True
 
+def upsert_into_chroma(df):
+    """
+    Upserts DataFrame content into Chroma vector store.
+    Returns nothing; the store is now persistent.
+    """
+    print("Starting Chroma ingestion...")
+    
+    # Initialize embedding model and vector store
+    embed_model = OllamaEmbedding(model_name="nomic-embed-text", base_url="http://localhost:11434")
+    chroma_store = ChromaVectorStore(persist_dir="./chroma_db")
+    
+    # Convert DataFrame rows to LlamaIndex Documents
+    documents = []
+    for _, row in df.iterrows():
+        doc = Document(
+            text=row["page_text"], 
+            metadata={"url": row["url"]}
+        )
+        documents.append(doc)
+    
+    print(f"Creating vector index with {len(documents)} documents...")
+    
+    # Create index from documents
+    index = VectorStoreIndex.from_documents(
+        documents,
+        embed_model=embed_model,
+        vector_store=chroma_store,
+        show_progress=True,
+    )
+    
+    # Persist the storage context
+    index.storage_context.persist()
+    print(f"Successfully ingested {len(documents)} documents into Chroma vector store")
+    
 def get_knowledge_list():
     # Check if collections already exists
     full_url = OPEN_WEBUI_DOMAIN_NAME + ":8080/api/v1/knowledge/list"
@@ -62,113 +100,6 @@ def get_knowledge_list():
     response_json = response.json()
     return response_json
 
-def upload_file(filepath, knowledge_id):
-    # First Upload File to Open Web UI
-    full_url = OPEN_WEBUI_DOMAIN_NAME + ":8080/api/v1/files/"
-    api_key = read_dot_api_key()
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Accept": "application/json"
-    }
-    file_data = None
-    try:
-        file_data = open(filepath, 'rb')
-    except FileNotFoundError:
-        print(f"File Not Found when looking for: '{filepath}'")
-        return ""
-    files = {"file": file_data}
-    upload_response = requests.post(url=full_url, headers=headers, files=files)
-    if upload_response.status_code not in range(200, 299):
-        print(f"[Error Report] filename: {filepath}")
-        print(f"[Error Report] file_data: {file_data}")
-        print_response_error(upload_response)
-        return ""
-
-    upload_response_json = upload_response.json()
-    file_upload_name = upload_response_json['filename']
-    file_id = upload_response_json["id"]
-    print(f"Uploaded file: '{file_upload_name}'")
-
-    # Second Add File to knowledge
-    add_to_knowledge_full_url = OPEN_WEBUI_DOMAIN_NAME + f":8080/api/v1/knowledge/{knowledge_id}/file/add"
-    data = {'file_id': file_id}
-    add_to_knowledge_response = requests.post(url=add_to_knowledge_full_url, headers=headers, json=data)
-    if add_to_knowledge_response.status_code not in range(200, 299):
-        return print_response_error(add_to_knowledge_response)
-    
-    print(f"Added file {file_upload_name}(file_id: {file_id}) to knowledge at ({knowledge_id})")
-    return file_id
-
-def update_file_content(filepath, file_id):
-    with open(filepath, 'rb') as f:
-        content = f.read()
-    full_url = OPEN_WEBUI_DOMAIN_NAME + f":8080/api/v1/files/{str(file_id)}/data/content/update"
-    headers = make_headers()
-    data = {"content": content.decode('utf-8')}
-    update_content_response = requests.post(url=full_url, headers=headers, json=data)
-    if update_content_response.status_code not in range(200, 299):
-        return print_response_error(update_content_response)
-
-    print(f"Update_content_response")
-
-
-def upload_or_update_files(df, remote_files):
-    """
-    note: df should be outputDf read from .jsonl, 
-    and this will return outputDf with file_ids
-    """
-    knowledge_ids = { knowledge['name']: knowledge['id'] for knowledge in get_knowledge_list() }
-
-    for idx, row in tqdm(df.iterrows(), desc="Uploading/Updating files to Open Web UI Server"):
-        filepath = str(row["doc_filepath"])
-        filename = os.path.basename(filepath)
-        knowledge_name = row.get("secondbreadcrumb", "Misc")
-        knowledge_name = knowledge_name if knowledge_name in KNOWLEDGE_LIST else "Misc"
-        knowledge_id = knowledge_ids[knowledge_name]
-
-        if filename not in remote_files:
-            tqdm.write(f"Uploading new file: {filename} to {knowledge_name}({knowledge_id})")
-            file_id = upload_file(filepath, knowledge_id)
-            df.at[idx, "remote_file_id"] = file_id
-        else:
-            file_id = remote_files[filename]
-            tqdm.write(f"Updating existing file: {filename}({file_id}) in {knowledge_name}({knowledge_id})")
-            update_file_content(filepath, file_id)
-            df.at[idx, "remote_file_id"] = file_id
-
-    return df
-
-def create_all_collections():
-    response_json = get_knowledge_list()
-    confirmed_knowledges = []
-    for knowledge in response_json:
-        confirmed_knowledges.append(knowledge["name"])
-    missing_knowledges = list(set(KNOWLEDGE_LIST) - set(confirmed_knowledges))
-    print(f"Aleady existing knowledges: {confirmed_knowledges}")
-    if missing_knowledges:
-        print(f"Missing knowledges to create: {', '.join(missing_knowledges)}")
-    else:
-        print("There are no knowledges to create")
-        return
-
-    # Send Create Knowledge API call for each missing knowledge
-    for missing_knowledge in missing_knowledges:
-        print(f"Attempting to create knowledge: {missing_knowledge}")
-        create_knowledge_url = OPEN_WEBUI_DOMAIN_NAME + ":8080/api/v1/knowledge/create"
-        headers = make_headers()
-        data = {
-            "name": missing_knowledge,
-            "description": f"Create fextralife's '{missing_knowledge}' knowledge partition",
-            "access_control": {
-                "public": True,
-            },
-        }
-        create_response = requests.post(url=create_knowledge_url, json=data, headers=headers)
-        if create_response.status_code not in range(200,299):
-            return print_response_error(create_response)
-
-        print(f"Creation Succeeded for knowledge: {missing_knowledge}")
-        print(f"Confirmation response: {json.dumps(create_response.json(), indent=2)}")
 
 def dedupe_and_build_breadcrumb_map():
     # read in data, dedupe, rewrite
@@ -177,11 +108,10 @@ def dedupe_and_build_breadcrumb_map():
         data = [json.loads(line) for line in f]
     outputDf = pd.DataFrame(data).drop_duplicates(subset=['url'], keep='last')
 
-    # Deal with uploading files to openwebui, adds file_id to outputDf
-    remote_files = get_remote_files()
-    outputDf = upload_or_update_files(outputDf, remote_files)
+    # Ingest into Chroma instead of uploading to OpenWebUI
+    upsert_into_chroma(outputDf)
 
-    # Rewrite after deduping and adding file_ids
+    # Rewrite after deduping 
     outputDf.to_json(filename, orient='records', lines=True)
 
     # Build tree and total page count

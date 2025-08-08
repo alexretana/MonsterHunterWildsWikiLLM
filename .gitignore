@@ -44,3 +44,5 @@ Thubms.db
 wikiproject/.open_webui_api_key
 
 */.ipynb_checkpoints/
+
+chroma_db/

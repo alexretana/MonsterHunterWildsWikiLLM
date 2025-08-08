@@ -1,7 +1,28 @@
 # 🐉 Monster Hunter Wilds Wiki Scraper & RAG Pipeline
 
 This project is a **Scrapy-based web crawler** designed to scrape data from multiple wiki sites about **Monster Hunter Wilds**.  
-The scraped data is then processed and uploaded to an **Open WebUI** knowledge base, enabling a local LLM chatbot to answer questions grounded in real wiki content — and link users directly to relevant pages.
+The scraped data is then processed and stored in a **persistent Chroma vector database**, enabling a local LLM chatbot via Open WebUI pipelines to answer questions grounded in real wiki content.
+
+## 🔄 **MIGRATION NOTICE** (January 2025)
+
+This project has **migrated from OpenWebUI's native knowledge bases to a persistent Chroma vector store** for better performance and flexibility:
+
+**✅ What Changed:**
+- Data is now stored in a persistent `chroma_db/` directory instead of OpenWebUI files
+- Uses LlamaIndex + Chroma for vector storage and retrieval
+- New pipeline: `custom_pipeline/llamaindex_chroma_rag.py` for querying
+- Removed dependency on OpenWebUI knowledge collections
+
+**🚧 Migration Steps:**
+1. Ensure `chroma_db/` directory exists and is in `.gitignore`
+2. Install LlamaIndex packages: `llama-index`, `llama-index-vector-stores-chroma`, `llama-index-embeddings-ollama`
+3. Run the scraper to populate Chroma: `scrapy crawl myfextralifespider`
+4. Use the new Chroma RAG pipeline in OpenWebUI
+
+**🗑️ Deprecated:**
+- OpenWebUI knowledge base creation/management
+- `knowledge_list.json` file
+- File upload/update functions
 
 
 ## 📦 Features
