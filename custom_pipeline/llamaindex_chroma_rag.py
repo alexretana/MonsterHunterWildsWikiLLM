@@ -55,6 +55,7 @@ class Pipeline:
         LLAMAINDEX_EMBEDDING_MODEL_NAME: str
         CHROMA_PERSIST_DIR: str
         SIMILARITY_TOP_K: int
+        DEBUG_MODE: bool
 
     def __init__(self):
         # Initialize the valves - CRITICAL for Open WebUI integration!
@@ -64,7 +65,8 @@ class Pipeline:
                 "LLAMAINDEX_MODEL_NAME": os.getenv("LLAMAINDEX_MODEL_NAME", "llama3:8b"),
                 "LLAMAINDEX_EMBEDDING_MODEL_NAME": os.getenv("LLAMAINDEX_EMBEDDING_MODEL_NAME", "nomic-embed-text"),
                 "CHROMA_PERSIST_DIR": os.getenv("CHROMA_PERSIST_DIR", "../../chroma_db"),
-                "SIMILARITY_TOP_K": int(os.getenv("SIMILARITY_TOP_K", "10")),  # Increased from 5 to 10
+                "SIMILARITY_TOP_K": int(os.getenv("SIMILARITY_TOP_K", "10")),
+                "DEBUG_MODE": os.getenv("DEBUG_MODE", "false").lower() in ["true", "1", "yes"],
             }
         )
         
@@ -87,12 +89,14 @@ class Pipeline:
             import chromadb
             
             print("Initializing LlamaIndex components...")
-            print(f"Current valves configuration:")
-            print(f"  - LLM Model: {self.valves.LLAMAINDEX_MODEL_NAME}")
-            print(f"  - Embedding Model: {self.valves.LLAMAINDEX_EMBEDDING_MODEL_NAME}")
-            print(f"  - Ollama URL: {self.valves.LLAMAINDEX_OLLAMA_BASE_URL}")
-            print(f"  - Chroma Dir: {self.valves.CHROMA_PERSIST_DIR}")
-            print(f"  - Top K: {self.valves.SIMILARITY_TOP_K}")
+            if self.valves.DEBUG_MODE:
+                print(f"Current valves configuration:")
+                print(f"  - LLM Model: {self.valves.LLAMAINDEX_MODEL_NAME}")
+                print(f"  - Embedding Model: {self.valves.LLAMAINDEX_EMBEDDING_MODEL_NAME}")
+                print(f"  - Ollama URL: {self.valves.LLAMAINDEX_OLLAMA_BASE_URL}")
+                print(f"  - Chroma Dir: {self.valves.CHROMA_PERSIST_DIR}")
+                print(f"  - Top K: {self.valves.SIMILARITY_TOP_K}")
+                print(f"  - Debug Mode: {self.valves.DEBUG_MODE}")
             
             # Apply the embedding fix
             patch_ollama_embedding()
@@ -104,19 +108,22 @@ class Pipeline:
             )
             
             # Initialize LLM
-            print(f"Initializing LLM with model: {self.valves.LLAMAINDEX_MODEL_NAME}")
+            if self.valves.DEBUG_MODE:
+                print(f"Initializing LLM with model: {self.valves.LLAMAINDEX_MODEL_NAME}")
             self.llm = Ollama(
                 model=self.valves.LLAMAINDEX_MODEL_NAME,
                 base_url=self.valves.LLAMAINDEX_OLLAMA_BASE_URL,
             )
-            print("[SUCCESS] LLM initialized successfully")
+            if self.valves.DEBUG_MODE:
+                print("[SUCCESS] LLM initialized successfully")
             
             # Set global settings
             Settings.embed_model = self.embed_model
             Settings.llm = self.llm
             
             # Initialize Chroma vector store from persistent directory
-            print(f"Loading Chroma vector store from {self.valves.CHROMA_PERSIST_DIR}")
+            if self.valves.DEBUG_MODE:
+                print(f"Loading Chroma vector store from {self.valves.CHROMA_PERSIST_DIR}")
             
             # Create persistent Chroma client (not HTTP client)
             chroma_client = chromadb.PersistentClient(path=self.valves.CHROMA_PERSIST_DIR)
@@ -129,22 +136,14 @@ class Pipeline:
                 embed_model=self.embed_model
             )
             
-            # Create query engine with debug-friendly settings
-            print(f"Creating query engine with similarity_top_k={self.valves.SIMILARITY_TOP_K}")
+            # Create query engine
+            if self.valves.DEBUG_MODE:
+                print(f"Creating query engine with similarity_top_k={self.valves.SIMILARITY_TOP_K}")
             self.query_engine = index.as_query_engine(
                 similarity_top_k=self.valves.SIMILARITY_TOP_K,
                 llm=self.llm,
-                # Add explicit response_mode for debugging
                 response_mode="compact"
             )
-            
-            # Test retriever directly to debug similarity thresholds
-            print("Testing retriever directly...")
-            test_retriever = index.as_retriever(similarity_top_k=self.valves.SIMILARITY_TOP_K)
-            test_nodes = test_retriever.retrieve("How does the stun mechanic work?")
-            print(f"Direct retriever test found {len(test_nodes)} nodes")
-            for i, node in enumerate(test_nodes[:2]):
-                print(f"  Node {i+1}: score={getattr(node, 'score', 'N/A')}, text_len={len(getattr(node, 'text', ''))}")
             
             print("LlamaIndex Chroma RAG Pipeline startup complete!")
             
@@ -161,8 +160,9 @@ class Pipeline:
     def pipe(
         self, user_message: str, model_id: str, messages: List[dict], body: dict
     ) -> Union[str, Generator, Iterator]:
-        print(f"\n=== LlamaIndex Chroma RAG Pipeline ===")
-        print(f"User message: {user_message}")
+        if self.valves.DEBUG_MODE:
+            print(f"\n=== LlamaIndex Chroma RAG Pipeline ===")
+            print(f"User message: {user_message}")
         
         if not self.query_engine:
             print("Query engine not initialized - pipeline is not functional")
@@ -170,83 +170,36 @@ class Pipeline:
         
         try:
             # Query the Chroma vector store using LlamaIndex
-            print("Querying Chroma vector store...")
-            print(f"Using LLM model: {self.llm.model if hasattr(self.llm, 'model') else 'unknown'}")
+            if self.valves.DEBUG_MODE:
+                print("Querying Chroma vector store...")
+                print(f"Using LLM model: {self.llm.model if hasattr(self.llm, 'model') else 'unknown'}")
             
-            # First test the retriever directly
-            print("\n--- Testing retriever directly ---")
-            retriever = self.query_engine.retriever
-            direct_nodes = retriever.retrieve(user_message)
-            print(f"Direct retriever found {len(direct_nodes)} nodes")
-            for i, node in enumerate(direct_nodes[:2]):
-                score = getattr(node, 'score', 'N/A')
-                text_len = len(getattr(node, 'text', ''))
-                print(f"Direct node {i+1}: score={score}, text_len={text_len}")
-            
-            # Now run the full query engine
-            print("\n--- Running full query engine ---")
             response = self.query_engine.query(user_message)
             
-            print(f"Retrieved response type: {type(response)}")
-            
-            # Debug: Check what's in the response object
-            if hasattr(response, 'source_nodes'):
-                print(f"Number of source nodes retrieved: {len(response.source_nodes)}")
-                for i, node in enumerate(response.source_nodes[:3]):  # Show first 3 nodes
-                    print(f"Source node {i+1}: {str(node.text)[:200]}...")
-                    print(f"Source node {i+1} score: {getattr(node, 'score', 'N/A')}")
-            else:
-                print("No source nodes found in response")
-                
-                # If no source nodes, check if it's a retriever filtering issue
-                if len(direct_nodes) > 0:
-                    print("\n[FAILURE] ISSUE: Retriever finds nodes but query engine has 0 source nodes!")
-                    print("This suggests a filtering or threshold issue in the query engine.")
-                    
-                    # Test with a more relaxed similarity threshold
-                    print("\nTesting with relaxed similarity settings...")
-                    relaxed_engine = self.query_engine.retriever._index.as_query_engine(
-                        similarity_top_k=10,  # More results
-                        llm=self.llm,
-                        response_mode="compact"
-                    )
-                    relaxed_response = relaxed_engine.query(user_message)
-                    if hasattr(relaxed_response, 'source_nodes'):
-                        print(f"Relaxed query found {len(relaxed_response.source_nodes)} source nodes")
-                        if len(relaxed_response.source_nodes) > 0:
-                            print("[SUCCESS] SOLUTION: Increasing similarity_top_k helps!")
-                            # Use the relaxed response
-                            response = relaxed_response
-                
-            if hasattr(response, 'response'):
-                actual_response = response.response
-                print(f"Actual response attribute: '{actual_response}'")
-                print(f"Actual response type: {type(actual_response)}")
-            else:
-                print("No response attribute found")
+            if self.valves.DEBUG_MODE:
+                print(f"Retrieved response type: {type(response)}")
+                if hasattr(response, 'source_nodes'):
+                    print(f"Number of source nodes retrieved: {len(response.source_nodes)}")
+                else:
+                    print("No source nodes found in response")
             
             response_str = str(response)
-            print(f"Response string length: {len(response_str)} characters")
-            print(f"Response preview: '{response_str[:200]}'")
-            print(f"Response exact match checks:")
-            print(f"  - Empty after strip: {not response_str.strip()}")
-            print(f"  - Equals 'Empty Response': {response_str.strip() == 'Empty Response'}")
-            print(f"  - Contains 'Empty Response': {'Empty Response' in response_str}")
             
+            # Check for empty responses
             if not response_str.strip() or response_str.strip().lower() in ['empty response', 'none', ''] or 'Empty Response' in response_str:
-                print("[WARNING] Response appears to be empty or contains 'Empty Response'!")
-                print("Attempting direct LLM call to debug...")
-                
-                # Try a direct LLM call to see if the model is working
-                try:
-                    direct_response = self.llm.complete(f"Answer this question about Monster Hunter: {user_message}")
-                    print(f"Direct LLM response: '{str(direct_response)[:200]}'")
-                except Exception as llm_error:
-                    print(f"Direct LLM call failed: {llm_error}")
+                if self.valves.DEBUG_MODE:
+                    print("[WARNING] Response appears to be empty, trying direct LLM call...")
+                    try:
+                        direct_response = self.llm.complete(f"Answer this question about Monster Hunter: {user_message}")
+                        print(f"Direct LLM response: '{str(direct_response)[:100]}...'")
+                    except Exception as llm_error:
+                        print(f"Direct LLM call failed: {llm_error}")
                 
                 return "I found relevant information in the knowledge base, but couldn't generate a proper response. Please try rephrasing your question."
             
-            print("Successfully retrieved response from Chroma RAG")
+            if self.valves.DEBUG_MODE:
+                print(f"Successfully retrieved response ({len(response_str)} characters)")
+            
             return response_str
             
         except Exception as e:
