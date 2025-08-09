@@ -7,13 +7,38 @@ from rich.tree import Tree
 
 # Chroma/LlamaIndex imports
 from llama_index.vector_stores.chroma import ChromaVectorStore
-from llama_index.core import VectorStoreIndex, Document
+from llama_index.core import VectorStoreIndex, Document, StorageContext
 from llama_index.embeddings.ollama import OllamaEmbedding
+from llama_index.core.base.embeddings.base import BaseEmbedding
+import chromadb
+from typing import List
+import ollama
 
 OPEN_WEBUI_DOMAIN_NAME = 'http://localhost'
 _API_KEY = None
 
 DOCUMENTS_DIR = "./output/documents"
+
+# Fixed OllamaEmbedding class to handle version compatibility issues
+class FixedOllamaEmbedding(OllamaEmbedding):
+    """Fixed version of OllamaEmbedding that handles EmbeddingsResponse objects correctly."""
+    
+    def get_general_text_embedding(self, texts: str) -> List[float]:
+        """Get Ollama embedding with proper response handling."""
+        result = self._client.embed(
+            model=self.model_name, input=texts, options=self.ollama_additional_kwargs
+        )
+        
+        # Handle different response formats
+        if hasattr(result, 'embeddings') and result.embeddings:  # EmbedResponse object
+            # embeddings is a list of lists, we want the first (and typically only) embedding
+            return result.embeddings[0]
+        elif hasattr(result, 'embedding'):  # EmbeddingsResponse object (older format)
+            return result.embedding
+        elif isinstance(result, dict) and "embedding" in result:  # Dictionary format
+            return result["embedding"]
+        else:
+            raise ValueError(f"Unexpected response format from Ollama: {type(result)}, {result}")
 
 def read_dot_api_key():
     global _API_KEY
@@ -61,14 +86,20 @@ def upsert_into_chroma(df):
     print("Starting Chroma ingestion...")
     
     # Initialize embedding model and vector store
-    embed_model = OllamaEmbedding(model_name="nomic-embed-text", base_url="http://localhost:11434")
-    chroma_store = ChromaVectorStore(persist_dir="./chroma_db")
+    print("Initializing Ollama embedding model...")
+    embed_model = FixedOllamaEmbedding(model_name="nomic-embed-text", base_url="http://localhost:11434")
+    
+    # Create persistent Chroma client (not HTTP client)
+    chroma_client = chromadb.PersistentClient(path="../chroma_db")
+    chroma_collection = chroma_client.get_or_create_collection("monsterhunter_fextralife_wiki")
+    vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
+    storage_context = StorageContext.from_defaults(vector_store=vector_store)
     
     # Convert DataFrame rows to LlamaIndex Documents
     documents = []
     for _, row in df.iterrows():
         doc = Document(
-            text=row["page_text"], 
+            text=row["wiki_content"], 
             metadata={"url": row["url"]}
         )
         documents.append(doc)
@@ -78,8 +109,8 @@ def upsert_into_chroma(df):
     # Create index from documents
     index = VectorStoreIndex.from_documents(
         documents,
+        storage_context=storage_context,
         embed_model=embed_model,
-        vector_store=chroma_store,
         show_progress=True,
     )
     
