@@ -13,6 +13,40 @@ from schemas import OpenAIChatMessage
 from pydantic import BaseModel
 import os
 
+def patch_ollama_embedding():
+    """Patch OllamaEmbedding class to handle version compatibility issues."""
+    from llama_index.embeddings.ollama import OllamaEmbedding
+    
+    # Store the original method
+    original_get_general_text_embedding = OllamaEmbedding.get_general_text_embedding
+    
+    def fixed_get_general_text_embedding(self, texts: str):
+        """Get Ollama embedding with proper response handling."""
+        result = self._client.embed(
+            model=self.model_name, 
+            input=texts, 
+            options=self.ollama_additional_kwargs
+        )
+        
+        # Handle different response formats
+        if hasattr(result, 'embeddings') and result.embeddings:  # EmbedResponse object
+            # embeddings is a list of lists, we want the first (and typically only) embedding
+            return result.embeddings[0]
+        elif hasattr(result, 'embedding'):  # EmbeddingsResponse object (older format)
+            return result.embedding
+        elif isinstance(result, dict) and "embedding" in result:  # Dictionary format
+            return result["embedding"]
+        else:
+            # Fallback to original method if we can't handle the response
+            try:
+                return original_get_general_text_embedding(self, texts)
+            except Exception as e:
+                raise ValueError(f"Unexpected response format from Ollama: {type(result)}, {result}. Original error: {e}")
+    
+    # Monkey patch the method
+    OllamaEmbedding.get_general_text_embedding = fixed_get_general_text_embedding
+    print("[SUCCESS] OllamaEmbedding patched for version compatibility")
+
 class Pipeline:
 
     class Valves(BaseModel):
@@ -27,7 +61,7 @@ class Pipeline:
         self.valves = self.Valves(
             **{
                 "LLAMAINDEX_OLLAMA_BASE_URL": os.getenv("LLAMAINDEX_OLLAMA_BASE_URL", "http://localhost:11434"),
-                "LLAMAINDEX_MODEL_NAME": os.getenv("LLAMAINDEX_MODEL_NAME", "llama3"),
+                "LLAMAINDEX_MODEL_NAME": os.getenv("LLAMAINDEX_MODEL_NAME", "llama3:8b"),
                 "LLAMAINDEX_EMBEDDING_MODEL_NAME": os.getenv("LLAMAINDEX_EMBEDDING_MODEL_NAME", "nomic-embed-text"),
                 "CHROMA_PERSIST_DIR": os.getenv("CHROMA_PERSIST_DIR", "./chroma_db"),
                 "SIMILARITY_TOP_K": int(os.getenv("SIMILARITY_TOP_K", "5")),
@@ -50,20 +84,32 @@ class Pipeline:
             from llama_index.llms.ollama import Ollama
             from llama_index.vector_stores.chroma import ChromaVectorStore
             from llama_index.core import VectorStoreIndex, Settings
+            import chromadb
             
             print("Initializing LlamaIndex components...")
+            print(f"Current valves configuration:")
+            print(f"  - LLM Model: {self.valves.LLAMAINDEX_MODEL_NAME}")
+            print(f"  - Embedding Model: {self.valves.LLAMAINDEX_EMBEDDING_MODEL_NAME}")
+            print(f"  - Ollama URL: {self.valves.LLAMAINDEX_OLLAMA_BASE_URL}")
+            print(f"  - Chroma Dir: {self.valves.CHROMA_PERSIST_DIR}")
+            print(f"  - Top K: {self.valves.SIMILARITY_TOP_K}")
             
-            # Initialize embedding model
+            # Apply the embedding fix
+            patch_ollama_embedding()
+            
+            # Initialize embedding model (now using patched version)
             self.embed_model = OllamaEmbedding(
                 model_name=self.valves.LLAMAINDEX_EMBEDDING_MODEL_NAME,
                 base_url=self.valves.LLAMAINDEX_OLLAMA_BASE_URL,
             )
             
             # Initialize LLM
+            print(f"Initializing LLM with model: {self.valves.LLAMAINDEX_MODEL_NAME}")
             self.llm = Ollama(
                 model=self.valves.LLAMAINDEX_MODEL_NAME,
                 base_url=self.valves.LLAMAINDEX_OLLAMA_BASE_URL,
             )
+            print("[SUCCESS] LLM initialized successfully")
             
             # Set global settings
             Settings.embed_model = self.embed_model
@@ -71,7 +117,11 @@ class Pipeline:
             
             # Initialize Chroma vector store from persistent directory
             print(f"Loading Chroma vector store from {self.valves.CHROMA_PERSIST_DIR}")
-            chroma_store = ChromaVectorStore(persist_dir=self.valves.CHROMA_PERSIST_DIR)
+            
+            # Create persistent Chroma client (not HTTP client)
+            chroma_client = chromadb.PersistentClient(path=self.valves.CHROMA_PERSIST_DIR)
+            chroma_collection = chroma_client.get_or_create_collection("monsterhunter_fextralife_wiki")
+            chroma_store = ChromaVectorStore(chroma_collection=chroma_collection)
             
             # Create index from existing vector store
             index = VectorStoreIndex.from_vector_store(
@@ -88,7 +138,9 @@ class Pipeline:
             print("LlamaIndex Chroma RAG Pipeline startup complete!")
             
         except Exception as e:
+            import traceback
             print(f"Error during startup: {e}")
+            print(f"Full traceback: {traceback.format_exc()}")
             print("Pipeline will not be functional without proper initialization")
 
     async def on_shutdown(self):
@@ -108,11 +160,24 @@ class Pipeline:
         try:
             # Query the Chroma vector store using LlamaIndex
             print("Querying Chroma vector store...")
+            print(f"Using LLM model: {self.llm.model if hasattr(self.llm, 'model') else 'unknown'}")
+            
             response = self.query_engine.query(user_message)
             
+            print(f"Retrieved response type: {type(response)}")
+            response_str = str(response)
+            print(f"Response length: {len(response_str)} characters")
+            print(f"Response preview: {response_str[:100]}...")
+            
+            if not response_str.strip() or response_str.strip().lower() in ['empty response', 'none', '']:
+                print("[WARNING] Response appears to be empty!")
+                return "I found relevant information in the knowledge base, but couldn't generate a proper response. Please try rephrasing your question."
+            
             print("Successfully retrieved response from Chroma RAG")
-            return str(response)
+            return response_str
             
         except Exception as e:
+            import traceback
             print(f"Error querying Chroma vector store: {e}")
+            print(f"Full traceback: {traceback.format_exc()}")
             return f"Sorry, I encountered an error while searching the knowledge base: {str(e)}"
