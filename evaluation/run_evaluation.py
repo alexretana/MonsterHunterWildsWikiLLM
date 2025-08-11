@@ -168,7 +168,8 @@ async def main():
                 print(f"      📊 {s['total_queries']} queries, "
                       f"⏱️  {s['overall_metrics']['average_response_time']:.2f}s avg, "
                       f"✅ {s['overall_metrics']['faithfulness_passing_rate']:.0f}% faithful, "
-                      f"🎯 {s['overall_metrics']['relevancy_passing_rate']:.0f}% relevant")
+                      f"🎯 {s['overall_metrics']['relevancy_passing_rate']:.0f}% relevant, "
+                      f"✔️  {s['overall_metrics']['correctness_passing_rate']:.0f}% correct")
                 if results_file:
                     print(f"      💾 {Path(results_file).name}")
         
