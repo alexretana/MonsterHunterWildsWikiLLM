@@ -8,8 +8,7 @@ description: A pipeline that uses LlamaIndex with persistent Chroma vector store
 requirements: llama-index, llama-index-llms-ollama, llama-index-embeddings-ollama, llama-index-vector-stores-chroma
 """
 
-from typing import List, Union, Generator, Iterator
-from schemas import OpenAIChatMessage
+from typing import List, Union, Generator, Iterator, Dict
 from pydantic import BaseModel
 import os
 
@@ -158,7 +157,7 @@ class Pipeline:
         pass
 
     def pipe(
-        self, user_message: str, model_id: str, messages: List[dict], body: dict
+        self, user_message: str, model_id: str, messages: List[Dict], body: dict
     ) -> Union[str, Generator, Iterator]:
         if self.valves.DEBUG_MODE:
             print(f"\n=== LlamaIndex Chroma RAG Pipeline ===")
@@ -180,10 +179,18 @@ class Pipeline:
                 print(f"Retrieved response type: {type(response)}")
                 if hasattr(response, 'source_nodes'):
                     print(f"Number of source nodes retrieved: {len(response.source_nodes)}")
+                    # Log source documents for evaluation purposes
+                    for i, node in enumerate(response.source_nodes[:3]):  # Show first 3
+                        print(f"  Source {i+1}: {node.node.text[:100]}...")
+                        print(f"  Score: {node.score if hasattr(node, 'score') else 'N/A'}")
                 else:
                     print("No source nodes found in response")
             
             response_str = str(response)
+            
+            # Store response metadata for potential evaluation use
+            self._last_response = response
+            self._last_query = user_message
             
             # Check for empty responses
             if not response_str.strip() or response_str.strip().lower() in ['empty response', 'none', ''] or 'Empty Response' in response_str:
@@ -207,3 +214,11 @@ class Pipeline:
             print(f"Error querying Chroma vector store: {e}")
             print(f"Full traceback: {traceback.format_exc()}")
             return f"Sorry, I encountered an error while searching the knowledge base: {str(e)}"
+    
+    def get_last_response_for_evaluation(self):
+        """Get the last LlamaIndex response object for evaluation purposes"""
+        return getattr(self, '_last_response', None)
+    
+    def get_last_query_for_evaluation(self):
+        """Get the last query for evaluation purposes"""
+        return getattr(self, '_last_query', None)
