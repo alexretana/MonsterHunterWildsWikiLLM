@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-Dataset Generation Utility
-Automatically generates evaluation questions from your Chroma vector database
-Using LlamaIndex's question generation capabilities
+Simple Dataset Generation Utility
+Generates evaluation questions from Chroma database using direct LLM prompting
 """
 
 import asyncio
@@ -13,13 +12,13 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 import chromadb
 from datetime import datetime
+import random
 
 # Add paths for imports
 sys.path.append(str(Path(__file__).parent))
 sys.path.append(str(Path(__file__).parent.parent))
 
 # LlamaIndex imports
-from llama_index.core.evaluation import DatasetGenerator
 from llama_index.llms.ollama import Ollama
 from llama_index.embeddings.ollama import OllamaEmbedding
 from llama_index.vector_stores.chroma import ChromaVectorStore
@@ -28,8 +27,8 @@ from llama_index.core import VectorStoreIndex, Settings
 # Import pipeline for Ollama patching
 sys.path.append('custom_pipeline')
 
-class EvaluationDatasetGenerator:
-    """Generate evaluation datasets from existing Chroma vector database"""
+class SimpleDatasetGenerator:
+    """Simple question generator using direct LLM prompts"""
     
     def __init__(self,
                  ollama_base_url: str = "http://localhost:11434",
@@ -44,7 +43,6 @@ class EvaluationDatasetGenerator:
         self.llm = None
         self.embed_model = None
         self.index = None
-        self.dataset_generator = None
         
     async def setup(self):
         """Setup LlamaIndex components"""
@@ -54,15 +52,17 @@ class EvaluationDatasetGenerator:
         from custom_pipeline.llamaindex_chroma_rag import patch_ollama_embedding
         patch_ollama_embedding()
         
-        # Initialize models
+        # Initialize models with extended timeout
         self.llm = Ollama(
             model=self.llm_model,
-            base_url=self.ollama_base_url
+            base_url=self.ollama_base_url,
+            request_timeout=300.0  # 5 minutes timeout
         )
         
         self.embed_model = OllamaEmbedding(
             model_name=self.embedding_model,
-            base_url=self.ollama_base_url
+            base_url=self.ollama_base_url,
+            request_timeout=120.0  # 2 minutes timeout
         )
         
         # Set global settings
@@ -83,58 +83,101 @@ class EvaluationDatasetGenerator:
         
         print(f"✅ Setup complete. Index has {len(chroma_collection.get()['ids'])} documents")
         
-    def get_sample_nodes(self, num_nodes: int = 50) -> List:
-        """Get a sample of nodes from the vector store for question generation"""
-        print(f"📄 Sampling {num_nodes} nodes for question generation...")
+    def get_sample_content(self, num_samples: int = 20) -> List[str]:
+        """Get sample content from the vector store"""
+        print(f"📄 Sampling {num_samples} pieces of content...")
         
         try:
             # Get retriever
-            retriever = self.index.as_retriever(similarity_top_k=num_nodes)
+            retriever = self.index.as_retriever(similarity_top_k=num_samples)
             
-            # Use a broad query to get diverse content
-            sample_nodes = retriever.retrieve("Monster Hunter Wilds gameplay weapons monsters crafting")
+            # Use diverse queries to get varied content
+            queries = [
+                "Monster Hunter Wilds weapons sword axe",
+                "gameplay mechanics combat system",
+                "monsters creatures dragons wyverns",
+                "crafting materials upgrades",
+                "world areas biomes locations",
+                "multiplayer solo gameplay features"
+            ]
             
-            print(f"✅ Retrieved {len(sample_nodes)} nodes")
-            return sample_nodes
-        
+            all_content = []
+            # Use more queries for better diversity when generating many questions
+            num_queries_to_use = min(len(queries), max(3, num_samples // 10))
+            samples_per_query = max(1, num_samples // num_queries_to_use)
+            
+            for i, query in enumerate(queries[:num_queries_to_use]):
+                nodes = retriever.retrieve(query)
+                for node in nodes[:samples_per_query]:
+                    content = node.node.get_content()[:500]  # Limit content length
+                    if content not in all_content:  # Avoid duplicates
+                        all_content.append(content)
+                        if len(all_content) >= num_samples:  # Stop if we have enough
+                            break
+                if len(all_content) >= num_samples:
+                    break
+            
+            print(f"✅ Retrieved {len(all_content)} unique content pieces")
+            return all_content[:num_samples]  # Return exactly the requested number
+            
         except Exception as e:
-            print(f"❌ Error retrieving nodes: {e}")
+            print(f"❌ Error retrieving content: {e}")
             return []
     
-    async def generate_questions(self, 
-                               num_questions: int = 20,
-                               num_nodes_sample: int = 50) -> List[Dict[str, Any]]:
-        """Generate evaluation questions from the vector database"""
+    async def generate_questions_from_content(self, content: str, num_questions: int = 3) -> List[str]:
+        """Generate questions from a piece of content"""
+        
+        prompt = f"""Based on the following content about Monster Hunter Wilds, generate {num_questions} diverse evaluation questions. The questions should be:
+1. Clear and answerable from the content
+2. Cover different aspects (gameplay, mechanics, features, etc.)  
+3. Mix of difficulty levels (easy factual, medium conceptual, hard analytical)
+
+Content:
+{content}
+
+Generate exactly {num_questions} questions, one per line, without numbering or bullet points:"""
+
+        try:
+            response = await self.llm.acomplete(prompt)
+            questions = [q.strip() for q in str(response).split('\n') if q.strip() and '?' in q]
+            return questions[:num_questions]  # Limit to requested number
+        except Exception as e:
+            print(f"❌ Error generating questions from content: {e}")
+            return []
+    
+    async def generate_questions(self, num_questions: int = 20) -> List[Dict[str, Any]]:
+        """Generate evaluation questions"""
         print(f"🤔 Generating {num_questions} evaluation questions...")
         
-        # Get sample nodes
-        nodes = self.get_sample_nodes(num_nodes_sample)
-        if not nodes:
-            print("❌ No nodes retrieved, cannot generate questions")
+        # Get sample content - scale with question count for better diversity
+        num_content_samples = min(max(20, num_questions // 5), 100)  # 20-100 samples based on question count
+        content_samples = self.get_sample_content(num_content_samples)
+        if not content_samples:
+            print("❌ No content retrieved, cannot generate questions")
             return []
         
-        # Initialize dataset generator
-        self.dataset_generator = DatasetGenerator.from_documents(
-            [node.node for node in nodes],  # Extract the actual document nodes
-            llm=self.llm,
-            num_questions_per_chunk=max(1, num_questions // len(nodes))
-        )
+        questions = []
+        questions_per_content = max(1, num_questions // len(content_samples))
         
-        try:
-            # Generate questions
-            eval_questions = await asyncio.to_thread(
-                self.dataset_generator.generate_questions_from_nodes,
-                num=num_questions
-            )
-            
-            print(f"✅ Generated {len(eval_questions)} questions")
-            return eval_questions
+        for i, content in enumerate(content_samples):
+            print(f"   Generating questions from content {i+1}/{len(content_samples)}")
+            try:
+                content_questions = await self.generate_questions_from_content(content, questions_per_content)
+                questions.extend(content_questions)
+                
+                # Stop if we have enough questions
+                if len(questions) >= num_questions:
+                    break
+                    
+            except Exception as e:
+                print(f"     ⚠️  Error with content {i+1}: {e}")
+                continue
         
-        except Exception as e:
-            print(f"❌ Error generating questions: {e}")
-            import traceback
-            traceback.print_exc()
-            return []
+        # Trim to exact number requested
+        questions = questions[:num_questions]
+        
+        print(f"✅ Generated {len(questions)} questions")
+        return [{"query": q} for q in questions]
     
     def categorize_question(self, question: str) -> tuple:
         """Categorize question based on content keywords"""
@@ -170,16 +213,17 @@ class EvaluationDatasetGenerator:
         
         return best_category, difficulty
     
-    def format_for_evaluation(self, generated_questions: List) -> List[Dict[str, Any]]:
+    def format_for_evaluation(self, generated_questions: List[Dict[str, str]]) -> List[Dict[str, Any]]:
         """Format generated questions for evaluation dataset"""
         print("📋 Formatting questions for evaluation dataset...")
         
         formatted_questions = []
         
-        for i, eq in enumerate(generated_questions):
-            # Extract question text (LlamaIndex structure may vary)
-            question_text = str(eq.query) if hasattr(eq, 'query') else str(eq)
-            
+        for i, q_dict in enumerate(generated_questions):
+            question_text = q_dict.get("query", "")
+            if not question_text:
+                continue
+                
             # Categorize the question
             category, difficulty = self.categorize_question(question_text)
             
@@ -207,7 +251,7 @@ class EvaluationDatasetGenerator:
         dataset = {
             "metadata": {
                 "generated_at": datetime.now().isoformat(),
-                "generator": "EvaluationDatasetGenerator",
+                "generator": "SimpleDatasetGenerator",
                 "llm_model": self.llm_model,
                 "embedding_model": self.embedding_model,
                 "total_questions": len(questions),
@@ -238,16 +282,15 @@ class EvaluationDatasetGenerator:
     
     async def generate_dataset(self, 
                              output_file: str,
-                             num_questions: int = 20,
-                             num_nodes_sample: int = 50):
+                             num_questions: int = 20):
         """Main workflow to generate evaluation dataset"""
-        print("🚀 Starting evaluation dataset generation...")
+        print("🚀 Starting simple evaluation dataset generation...")
         
         # Setup
         await self.setup()
         
         # Generate questions
-        raw_questions = await self.generate_questions(num_questions, num_nodes_sample)
+        raw_questions = await self.generate_questions(num_questions)
         if not raw_questions:
             print("❌ Failed to generate questions")
             return False
@@ -264,11 +307,11 @@ class EvaluationDatasetGenerator:
 async def main():
     import argparse
     
-    parser = argparse.ArgumentParser(description="Generate evaluation dataset from Chroma database")
+    parser = argparse.ArgumentParser(description="Generate evaluation dataset from Chroma database (Simple)")
     parser.add_argument(
         "--output",
         type=str,
-        default="evaluation/datasets/generated_queries.json",
+        default="evaluation/datasets/simple_generated_queries.json",
         help="Output file for generated dataset"
     )
     parser.add_argument(
@@ -276,12 +319,6 @@ async def main():
         type=int,
         default=20,
         help="Number of questions to generate"
-    )
-    parser.add_argument(
-        "--num-nodes",
-        type=int,
-        default=50,
-        help="Number of nodes to sample for generation"
     )
     parser.add_argument(
         "--chroma-dir",
@@ -311,7 +348,7 @@ async def main():
         return 1
     
     try:
-        generator = EvaluationDatasetGenerator(
+        generator = SimpleDatasetGenerator(
             llm_model=args.llm_model,
             embedding_model=args.embedding_model,
             chroma_persist_dir=args.chroma_dir
@@ -319,8 +356,7 @@ async def main():
         
         success = await generator.generate_dataset(
             output_file=args.output,
-            num_questions=args.num_questions,
-            num_nodes_sample=args.num_nodes
+            num_questions=args.num_questions
         )
         
         return 0 if success else 1

@@ -14,6 +14,10 @@ from typing import List, Dict, Any, Tuple, Optional
 from dataclasses import dataclass, asdict
 from datetime import datetime
 import pandas as pd
+import nest_asyncio
+
+# Enable nested asyncio to fix compatibility issues with LlamaIndex evaluators
+nest_asyncio.apply()
 
 # LlamaIndex imports for evaluation
 from llama_index.core.evaluation import (
@@ -42,6 +46,11 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+# Reduce noise from HTTP requests
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("chromadb").setLevel(logging.WARNING)
 
 @dataclass
 class EvaluationQuery:
@@ -177,8 +186,18 @@ class RAGEvaluator:
             with open(dataset_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             
+            # Handle different dataset formats
+            # Format 1: Dict with metadata and questions keys (new generated format)
+            # Format 2: Direct list of queries (legacy manual format)
+            if isinstance(data, dict) and 'questions' in data:
+                questions_data = data['questions']
+                logger.debug(f"Loading dataset in new format with metadata from {dataset_path}")
+            else:
+                questions_data = data
+                logger.debug(f"Loading dataset in legacy format from {dataset_path}")
+            
             queries = []
-            for item in data:
+            for item in questions_data:
                 query = EvaluationQuery(
                     query=item['query'],
                     expected_answer=item.get('expected_answer'),
@@ -254,56 +273,94 @@ class RAGEvaluator:
         return result
     
     async def _run_response_evaluations(self, response, eval_query: EvaluationQuery, result: EvaluationResult):
-        """Run response-level evaluations"""
+        """Run response-level evaluations with improved async handling"""
         
         # Faithfulness evaluation
         try:
-            faithfulness_result = await asyncio.to_thread(
-                self.faithfulness_evaluator.evaluate_response, response=response
-            )
-            result.faithfulness_score = faithfulness_result.score if hasattr(faithfulness_result, 'score') else None
-            result.faithfulness_passing = faithfulness_result.passing
+            logger.debug(f"Running faithfulness evaluation for query: {eval_query.query[:50]}...")
+            # Try using the native async method if available, otherwise fall back to thread
+            if hasattr(self.faithfulness_evaluator, 'aevaluate_response'):
+                faithfulness_result = await self.faithfulness_evaluator.aevaluate_response(response=response)
+            else:
+                faithfulness_result = await asyncio.to_thread(
+                    self.faithfulness_evaluator.evaluate_response, response=response
+                )
+            result.faithfulness_score = getattr(faithfulness_result, 'score', None)
+            result.faithfulness_passing = getattr(faithfulness_result, 'passing', None)
+            logger.debug(f"Faithfulness evaluation complete: score={result.faithfulness_score}, passing={result.faithfulness_passing}")
         except Exception as e:
-            logger.error(f"Faithfulness evaluation error: {e}")
+            logger.warning(f"Faithfulness evaluation error: {e}")
+            result.faithfulness_score = None
+            result.faithfulness_passing = None
         
         # Relevancy evaluation
         try:
-            relevancy_result = await asyncio.to_thread(
-                self.relevancy_evaluator.evaluate_response, 
-                query=eval_query.query, 
-                response=response
-            )
-            result.relevancy_score = relevancy_result.score if hasattr(relevancy_result, 'score') else None
-            result.relevancy_passing = relevancy_result.passing
+            logger.debug(f"Running relevancy evaluation for query: {eval_query.query[:50]}...")
+            if hasattr(self.relevancy_evaluator, 'aevaluate_response'):
+                relevancy_result = await self.relevancy_evaluator.aevaluate_response(
+                    query=eval_query.query, response=response
+                )
+            else:
+                relevancy_result = await asyncio.to_thread(
+                    self.relevancy_evaluator.evaluate_response, 
+                    query=eval_query.query, 
+                    response=response
+                )
+            result.relevancy_score = getattr(relevancy_result, 'score', None)
+            result.relevancy_passing = getattr(relevancy_result, 'passing', None)
+            logger.debug(f"Relevancy evaluation complete: score={result.relevancy_score}, passing={result.relevancy_passing}")
         except Exception as e:
-            logger.error(f"Relevancy evaluation error: {e}")
+            logger.warning(f"Relevancy evaluation error: {e}")
+            result.relevancy_score = None
+            result.relevancy_passing = None
         
         # Correctness evaluation (if we have expected answer)
         if eval_query.expected_answer:
             try:
-                correctness_result = await asyncio.to_thread(
-                    self.correctness_evaluator.evaluate_response,
-                    query=eval_query.query,
-                    response=response,
-                    reference=eval_query.expected_answer
-                )
-                result.correctness_score = correctness_result.score if hasattr(correctness_result, 'score') else None
-                result.correctness_passing = correctness_result.passing
+                logger.debug(f"Running correctness evaluation for query: {eval_query.query[:50]}...")
+                if hasattr(self.correctness_evaluator, 'aevaluate_response'):
+                    correctness_result = await self.correctness_evaluator.aevaluate_response(
+                        query=eval_query.query,
+                        response=response,
+                        reference=eval_query.expected_answer
+                    )
+                else:
+                    correctness_result = await asyncio.to_thread(
+                        self.correctness_evaluator.evaluate_response,
+                        query=eval_query.query,
+                        response=response,
+                        reference=eval_query.expected_answer
+                    )
+                result.correctness_score = getattr(correctness_result, 'score', None)
+                result.correctness_passing = getattr(correctness_result, 'passing', None)
+                logger.debug(f"Correctness evaluation complete: score={result.correctness_score}, passing={result.correctness_passing}")
             except Exception as e:
-                logger.error(f"Correctness evaluation error: {e}")
+                logger.warning(f"Correctness evaluation error: {e}")
+                result.correctness_score = None
+                result.correctness_passing = None
         
         # Semantic similarity evaluation
         if eval_query.expected_answer:
             try:
-                similarity_result = await asyncio.to_thread(
-                    self.semantic_similarity_evaluator.evaluate_response,
-                    query=eval_query.query,
-                    response=response,
-                    reference=eval_query.expected_answer
-                )
-                result.semantic_similarity_score = similarity_result.score if hasattr(similarity_result, 'score') else None
+                logger.debug(f"Running semantic similarity evaluation for query: {eval_query.query[:50]}...")
+                if hasattr(self.semantic_similarity_evaluator, 'aevaluate_response'):
+                    similarity_result = await self.semantic_similarity_evaluator.aevaluate_response(
+                        query=eval_query.query,
+                        response=response,
+                        reference=eval_query.expected_answer
+                    )
+                else:
+                    similarity_result = await asyncio.to_thread(
+                        self.semantic_similarity_evaluator.evaluate_response,
+                        query=eval_query.query,
+                        response=response,
+                        reference=eval_query.expected_answer
+                    )
+                result.semantic_similarity_score = getattr(similarity_result, 'score', None)
+                logger.debug(f"Semantic similarity evaluation complete: score={result.semantic_similarity_score}")
             except Exception as e:
-                logger.error(f"Semantic similarity evaluation error: {e}")
+                logger.warning(f"Semantic similarity evaluation error: {e}")
+                result.semantic_similarity_score = None
     
     async def _run_retrieval_evaluation(self, eval_query: EvaluationQuery, result: EvaluationResult):
         """Run retrieval-level evaluations"""

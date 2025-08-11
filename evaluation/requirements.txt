@@ -8,6 +8,9 @@ llama-index-vector-stores-chroma>=0.1.0
 # Vector database
 chromadb>=0.4.0
 
+# Async compatibility
+nest-asyncio>=1.5.0
+
 # Data processing and analysis
 pandas>=2.0.0
 numpy>=1.24.0
