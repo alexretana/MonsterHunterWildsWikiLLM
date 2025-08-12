@@ -49,8 +49,27 @@ A comprehensive **two-part RAG (Retrieval-Augmented Generation) system** for Mon
 
 ## 🚀 **Quick Start**
 
-### **1. Setup Environments**
-This project uses two separate Conda environments for optimal dependency management.
+### **Option 1: Automated Startup (Recommended)**
+Use the provided startup scripts that automatically manage environments and launch both services:
+
+**On Windows:**
+```cmd
+start_windows.bat
+```
+
+**On Linux/macOS:**
+```bash
+./start.sh
+```
+
+These scripts will:
+- Automatically check if the required conda environments exist
+- Create them from the YAML files if they don't exist
+- Launch OpenWebUI backend and OpenWebUI Pipelines in separate terminal windows
+- Handle all environment activation and directory navigation
+
+### **Option 2: Manual Setup**
+If you prefer manual control or need to troubleshoot:
 
 **For the Scraper:**
 ```bash
@@ -62,6 +81,12 @@ conda activate wikiscrap2
 ```bash
 conda env create -f owu-pipeline-environment.yaml
 conda activate openwebui-pipelines
+```
+
+**For OpenWebUI Backend:**
+```bash
+conda env create -f openwebui-environment.yaml
+conda activate openwebui
 ```
 
 ### **2. Run the Web Scraper**
@@ -115,6 +140,11 @@ View detailed results in `evaluation/results/` directory.
 │   └── scrapy.cfg
 ├── chroma_db/                     # Persistent Chroma vector store (gitignored)
 ├── external/                      # Third-party libraries (gitignored)
+│   ├── open-webui-8-6-2025/      # OpenWebUI backend
+│   └── open-webui-pipelines/     # OpenWebUI pipelines
+├── start_windows.bat              # Windows startup script (automated setup)
+├── start.sh                       # Unix/Linux startup script (automated setup)
+├── openwebui-environment.yaml    # Conda environment for OpenWebUI backend
 ├── scrapy-environmental.yaml     # Conda environment for web scraping
 ├── owu-pipeline-environment.yaml # Conda environment for RAG & evaluation
 ├── test_prompt_improvements.py   # Testing utilities for prompt optimization
