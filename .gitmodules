@@ -3,4 +3,4 @@
 	url = https://github.com/alexretana/open-webui-8-6-2025.git
 [submodule "external/open-webui-pipelines"]
 	path = external/open-webui-pipelines
-	url = https://github.com/open-webui/pipelines.git
+	url = https://github.com/alexretana/pipelines-MHW.git
