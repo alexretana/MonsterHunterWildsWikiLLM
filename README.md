@@ -47,10 +47,34 @@ A comprehensive **two-part RAG (Retrieval-Augmented Generation) system** for Mon
 ✅ **Performance tracking** with detailed reports and category breakdowns  
 ✅ **Comparative analysis** across different configurations and datasets  
 
+## 📋 **Prerequisites**
+
+Before running the automated startup scripts, ensure you have:
+
+### **Required Software**
+- **Anaconda or Miniconda** (for environment management)
+- **Git** (for cloning repositories)
+
+### **Platform-Specific Requirements**
+
+**Windows:**
+- **Chocolatey** (recommended for automatic Ollama installation)
+  - If not installed, get it from: https://chocolatey.org/install
+  - Alternative: Manual Ollama installation from https://ollama.ai/download
+
+**Linux/macOS:**
+- **curl** (usually pre-installed)
+- **Terminal access** (for automatic Ollama installation)
+
+### **Hardware Recommendations**
+- **8GB+ RAM** (for running Ollama models)
+- **5GB+ free disk space** (for AI models and dependencies)
+- **Internet connection** (for downloading models and dependencies)
+
 ## 🚀 **Quick Start**
 
 ### **Option 1: Automated Startup (Recommended)**
-Use the provided startup scripts that automatically manage environments and launch both services:
+Use the provided startup scripts that automatically manage all dependencies and launch the complete system:
 
 **On Windows:**
 ```cmd
@@ -63,10 +87,24 @@ start_windows.bat
 ```
 
 These scripts will:
-- Automatically check if the required conda environments exist
-- Create them from the YAML files if they don't exist
-- Launch OpenWebUI backend and OpenWebUI Pipelines in separate terminal windows
-- Handle all environment activation and directory navigation
+- **Check and install Ollama server** if not already present
+  - Windows: Uses Chocolatey (with fallback instructions)
+  - Linux/macOS: Uses official curl-based installer
+- **Install required AI models** automatically:
+  - `llama3:8b` - Main LLM for question answering
+  - `nomic-embed-text` - Embedding model for vector store
+- **Manage Ollama server lifecycle**:
+  - Detect if already running on port 11434
+  - Start server in separate terminal if needed
+  - Track server state to avoid conflicts
+- **Handle conda environments**:
+  - Check if required environments exist
+  - Create them from YAML files if missing
+- **Launch all services** in separate terminal windows:
+  - Ollama server (if not already running)
+  - OpenWebUI backend
+  - OpenWebUI Pipelines
+- **Comprehensive error handling** with helpful troubleshooting messages
 
 ### **Option 2: Manual Setup**
 If you prefer manual control or need to troubleshoot:
@@ -203,6 +241,58 @@ Evaluations are broken down by Monster Hunter categories:
 - Crafting & Materials
 - World & Environment
 - Technical & System Info
+
+## 🔧 **Troubleshooting**
+
+### **Common Ollama Issues**
+
+**Ollama Installation Failed (Windows):**
+- Ensure Chocolatey is installed: `choco --version`
+- Run PowerShell/CMD as Administrator
+- Manually install from: https://ollama.ai/download
+
+**Ollama Installation Failed (Linux/macOS):**
+- Check curl availability: `curl --version`
+- Ensure internet connectivity
+- Try manual installation: Download from https://ollama.ai/download
+
+**Model Download Issues:**
+- Check available disk space (models can be 4-7GB each)
+- Verify internet connection
+- Manually pull models: `ollama pull llama3:8b`
+
+**Port 11434 Already in Use:**
+- Check what's using the port: `netstat -an | findstr 11434` (Windows) or `lsof -i :11434` (Linux/macOS)
+- Stop existing Ollama instance or change port in configuration
+
+**Memory Issues:**
+- Ensure at least 8GB RAM available
+- Close other applications before starting
+- Consider using smaller models if available
+
+### **Conda Environment Issues**
+
+**Environment Creation Failed:**
+- Check conda installation: `conda --version`
+- Ensure YAML files exist in project directory
+- Try updating conda: `conda update conda`
+
+**Activation Issues:**
+- Initialize conda: `conda init`
+- Restart terminal after conda init
+- Check environment exists: `conda env list`
+
+### **Service Startup Issues**
+
+**Terminal Windows Don't Open:**
+- Check if running in compatible terminal (not VS Code integrated terminal)
+- Try manual activation and startup
+- Check script permissions (Linux/macOS): `chmod +x start.sh`
+
+**Services Fail to Connect:**
+- Verify all services are running (check terminal windows)
+- Check port availability (11434 for Ollama, default ports for OpenWebUI)
+- Wait for services to fully initialize (30-60 seconds)
 
 ## 🧪 **Testing & Development**
 
