@@ -11,6 +11,7 @@ requirements: llama-index, llama-index-llms-ollama, llama-index-embeddings-ollam
 from typing import List, Union, Generator, Iterator, Dict
 from pydantic import BaseModel
 import os
+from llama_index.core.prompts import PromptTemplate
 
 def patch_ollama_embedding():
     """Patch OllamaEmbedding class to handle version compatibility issues."""
@@ -55,6 +56,9 @@ class Pipeline:
         CHROMA_PERSIST_DIR: str
         SIMILARITY_TOP_K: int
         DEBUG_MODE: bool
+        USE_CUSTOM_PROMPTS: bool
+        USE_CONVERSATION_CONTEXT: bool
+        RESPONSE_MODE: str
 
     def __init__(self):
         # Initialize the valves - CRITICAL for Open WebUI integration!
@@ -66,6 +70,9 @@ class Pipeline:
                 "CHROMA_PERSIST_DIR": os.getenv("CHROMA_PERSIST_DIR", "../../chroma_db"),
                 "SIMILARITY_TOP_K": int(os.getenv("SIMILARITY_TOP_K", "10")),
                 "DEBUG_MODE": os.getenv("DEBUG_MODE", "false").lower() in ["true", "1", "yes"],
+                "USE_CUSTOM_PROMPTS": os.getenv("USE_CUSTOM_PROMPTS", "true").lower() in ["true", "1", "yes"],
+                "USE_CONVERSATION_CONTEXT": os.getenv("USE_CONVERSATION_CONTEXT", "false").lower() in ["true", "1", "yes"],
+                "RESPONSE_MODE": os.getenv("RESPONSE_MODE", "compact"),
             }
         )
         
@@ -74,7 +81,97 @@ class Pipeline:
         self.llm = None
         self.query_engine = None
         
+        # Custom prompts
+        self.custom_prompts = self._initialize_custom_prompts()
+        
         print("LlamaIndex Chroma RAG Pipeline initialized")
+
+    def _initialize_custom_prompts(self) -> Dict[str, PromptTemplate]:
+        """Initialize custom prompt templates for Monster Hunter knowledge base."""
+        
+        # Enhanced QA prompt with domain-specific instructions
+        mh_qa_template = PromptTemplate(
+            """
+            You are an expert Monster Hunter guide and wiki assistant. You have access to comprehensive Monster Hunter knowledge including monsters, weapons, armor, quests, mechanics, and strategies.
+
+            Context Information:
+            ---------------------
+            {context_str}
+            ---------------------
+
+            Instructions:
+            - Use ONLY the provided context to answer the question
+            - If information is not in the context, clearly state "I don't have information about [specific topic] in my current knowledge base"
+            - For Monster Hunter terms, provide clear definitions and explanations
+            - When discussing strategies, weapons, or mechanics, be specific and actionable
+            - Include relevant stats, locations, or requirements when available in the context
+            - Use Monster Hunter terminology correctly (e.g., "Great Sword" not "Greatsword")
+            - If asked about multiple items, organize the response with clear sections
+            - For weapon recommendations, consider context like monster weaknesses and playstyle
+
+            Question: {query_str}
+
+            Answer (based solely on the provided context):
+            """
+        )
+        
+        # Enhanced refine prompt for multi-chunk responses
+        mh_refine_template = PromptTemplate(
+            """
+            You are an expert Monster Hunter guide refining an answer with additional context.
+
+            Original Question: {query_str}
+            
+            Existing Answer:
+            {existing_answer}
+            
+            Additional Context:
+            ------------
+            {context_msg}
+            ------------
+            
+            Instructions for refinement:
+            - Integrate new information smoothly with the existing answer
+            - Remove any contradictory information, prioritizing more specific/recent context
+            - Maintain Monster Hunter terminology and accuracy
+            - Keep the response organized and easy to follow
+            - If new context doesn't add value, return the original answer unchanged
+            - Ensure all information is supported by the provided contexts
+            
+            Refined Answer:
+            """
+        )
+        
+        # Summary template for multiple sources
+        mh_summary_template = PromptTemplate(
+            """
+            You are an expert Monster Hunter guide synthesizing information from multiple sources.
+
+            Context from Multiple Sources:
+            ---------------------
+            {context_str}
+            ---------------------
+
+            Instructions:
+            - Synthesize information from all sources into a comprehensive answer
+            - Resolve any contradictions by noting different perspectives or conditions
+            - Organize information logically (e.g., basic info first, then strategies, then advanced tips)
+            - Use Monster Hunter terminology accurately
+            - Include specific details like stats, locations, requirements when available
+            - If sources cover different aspects, address each relevant aspect
+            - Cite when information comes from specific contexts (e.g., "According to one source...")
+
+            Question: {query_str}
+
+            Comprehensive Answer:
+            """
+        )
+        
+        return {
+            "text_qa_template": mh_qa_template,
+            "refine_template": mh_refine_template,
+            "summary_template": mh_summary_template
+        }
 
     async def on_startup(self):
         print("Starting LlamaIndex Chroma RAG Pipeline startup...")
@@ -141,8 +238,30 @@ class Pipeline:
             self.query_engine = index.as_query_engine(
                 similarity_top_k=self.valves.SIMILARITY_TOP_K,
                 llm=self.llm,
-                response_mode="compact"
+                response_mode=self.valves.RESPONSE_MODE
             )
+            
+            # Apply custom prompts if enabled
+            if self.valves.USE_CUSTOM_PROMPTS:
+                if self.valves.DEBUG_MODE:
+                    print("Applying custom Monster Hunter prompts...")
+                try:
+                    self.query_engine.update_prompts({
+                        "response_synthesizer:text_qa_template": self.custom_prompts["text_qa_template"],
+                        "response_synthesizer:refine_template": self.custom_prompts["refine_template"],
+                        "response_synthesizer:summary_template": self.custom_prompts["summary_template"]
+                    })
+                    if self.valves.DEBUG_MODE:
+                        print("[SUCCESS] Custom prompts applied to query engine")
+                        # Display applied prompts for verification
+                        applied_prompts = self.query_engine.get_prompts()
+                        print(f"Applied {len(applied_prompts)} custom prompt templates")
+                except Exception as prompt_error:
+                    print(f"[WARNING] Failed to apply custom prompts: {prompt_error}")
+                    print("Continuing with default prompts...")
+            else:
+                if self.valves.DEBUG_MODE:
+                    print("Using default LlamaIndex prompts (custom prompts disabled)")
             
             print("LlamaIndex Chroma RAG Pipeline startup complete!")
             
@@ -168,12 +287,20 @@ class Pipeline:
             return "Sorry, the RAG system is not properly initialized. Please check the logs and ensure Chroma database exists."
         
         try:
+            # Enhance query with conversation context if enabled
+            query_to_use = user_message
+            if self.valves.USE_CONVERSATION_CONTEXT:
+                query_to_use = self._enhance_query_with_context(user_message, messages)
+            
             # Query the Chroma vector store using LlamaIndex
             if self.valves.DEBUG_MODE:
                 print("Querying Chroma vector store...")
                 print(f"Using LLM model: {self.llm.model if hasattr(self.llm, 'model') else 'unknown'}")
+                print(f"Response mode: {self.valves.RESPONSE_MODE}")
+                if query_to_use != user_message:
+                    print("Using enhanced query with conversation context")
             
-            response = self.query_engine.query(user_message)
+            response = self.query_engine.query(query_to_use)
             
             if self.valves.DEBUG_MODE:
                 print(f"Retrieved response type: {type(response)}")
@@ -222,3 +349,61 @@ class Pipeline:
     def get_last_query_for_evaluation(self):
         """Get the last query for evaluation purposes"""
         return getattr(self, '_last_query', None)
+    
+    def get_current_prompts(self) -> Dict[str, str]:
+        """Get the currently active prompts from the query engine."""
+        if not self.query_engine:
+            return {"error": "Query engine not initialized"}
+        
+        try:
+            prompts_dict = self.query_engine.get_prompts()
+            return {key: str(template) for key, template in prompts_dict.items()}
+        except Exception as e:
+            return {"error": f"Failed to retrieve prompts: {e}"}
+    
+    def update_prompt(self, prompt_key: str, new_template: str) -> bool:
+        """Update a specific prompt template."""
+        if not self.query_engine:
+            print("Query engine not initialized")
+            return False
+        
+        try:
+            template = PromptTemplate(new_template)
+            self.query_engine.update_prompts({prompt_key: template})
+            if self.valves.DEBUG_MODE:
+                print(f"[SUCCESS] Updated prompt: {prompt_key}")
+            return True
+        except Exception as e:
+            print(f"[ERROR] Failed to update prompt {prompt_key}: {e}")
+            return False
+    
+    def _enhance_query_with_context(self, user_message: str, messages: List[Dict]) -> str:
+        """Enhance the user query with conversation context if available."""
+        if not messages or len(messages) <= 1:
+            return user_message
+        
+        # Get recent conversation context (last 3 exchanges)
+        recent_context = []
+        for msg in messages[-6:]:  # Last 6 messages (3 exchanges)
+            role = msg.get('role', 'unknown')
+            content = msg.get('content', '')
+            if role in ['user', 'assistant'] and content:
+                recent_context.append(f"{role.title()}: {content[:200]}...")  # Truncate long messages
+        
+        if recent_context:
+            context_str = "\n".join(recent_context)
+            enhanced_query = f"""
+            Previous conversation context:
+            {context_str}
+            
+            Current question: {user_message}
+            
+            (Please answer the current question while being aware of the previous context)
+            """.strip()
+            
+            if self.valves.DEBUG_MODE:
+                print(f"Enhanced query with conversation context ({len(recent_context)} previous messages)")
+            
+            return enhanced_query
+        
+        return user_message
