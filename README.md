@@ -71,9 +71,48 @@ Before running the automated startup scripts, ensure you have:
 - **5GB+ free disk space** (for AI models and dependencies)
 - **Internet connection** (for downloading models and dependencies)
 
+## 🔨 **Frontend Build Process**
+
+Before running the complete system, you may need to build the OpenWebUI frontend. The build scripts will compile the SvelteKit frontend application and prepare it for the backend to serve.
+
+### **Prerequisites for Building**
+- **Node.js** version 22.10 or higher ([Download from nodejs.org](https://nodejs.org/))
+- **npm** (included with Node.js)
+- **Internet connection** (for downloading dependencies)
+
+### **Build Commands**
+
+**On Windows:**
+```cmd
+build.bat
+```
+
+**On Linux/macOS:**
+```bash
+./build.sh
+```
+
+### **What the Build Process Does**
+The build scripts will:
+- ✅ **Check Node.js installation** and version compatibility
+- ✅ **Navigate to the frontend directory** (`external/open-webui-8-6-2025`)
+- ✅ **Install dependencies** using `npm install`
+- ✅ **Build the frontend** using `npm run build` (includes Pyodide setup and Vite compilation)
+- ✅ **Generate optimized static files** ready for the backend to serve
+
+### **When to Build**
+- **First time setup**: Always run the build script before using the startup scripts
+- **After frontend updates**: If you update the OpenWebUI frontend code
+- **Development**: When making changes to the frontend source code
+
+**Note**: The build process may take several minutes depending on your internet connection and system performance.
+
 ## 🚀 **Quick Start**
 
 ### **Option 1: Automated Startup (Recommended)**
+
+⚠️ **Important**: Before running the startup scripts for the first time, make sure to build the frontend using the build scripts above.
+
 Use the provided startup scripts that automatically manage all dependencies and launch the complete system:
 
 **On Windows:**
@@ -180,6 +219,8 @@ View detailed results in `evaluation/results/` directory.
 ├── external/                      # Third-party libraries (gitignored)
 │   ├── open-webui-8-6-2025/      # OpenWebUI backend
 │   └── open-webui-pipelines/     # OpenWebUI pipelines
+├── build.bat                      # Windows frontend build script
+├── build.sh                       # Unix/Linux frontend build script
 ├── start_windows.bat              # Windows startup script (automated setup)
 ├── start.sh                       # Unix/Linux startup script (automated setup)
 ├── openwebui-environment.yaml    # Conda environment for OpenWebUI backend
